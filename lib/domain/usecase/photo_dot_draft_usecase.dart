@@ -3,7 +3,7 @@ import 'package:image/image.dart' as img;
 
 enum DraftFilter {
   smooth, // Photo-like (average + tiny blur)
-  crisp, // Pixel-like (nearest)
+  crisp, // Pixel-like (nearest at final)
 }
 
 class DraftGenerationParams {
@@ -34,13 +34,10 @@ class _GenerationArgs {
   _GenerationArgs(this.bytes, this.params);
 }
 
-/// Minimal-diff, stable pipeline:
-/// - Keep photo-like by default (Smooth)
-/// - Still "dot-like" via palette quantization (no dither, higher colors for Smooth)
-/// - Reduce black speckles safely:
-///   1) tiny pre-blur only for Smooth
-///   2) near-white -> white before quantize
-///   3) very restricted pepper removal (only on bright background & bg-like pixels)
+/// No-quantize (NO color reduction), minimal-diff stable pipeline:
+/// - Photo-like base via average downscale (+ tiny blur for smooth)
+/// - Dot-like feel via final interpolation toggle (Smooth=average / Crisp=nearest)
+/// - Black speckle reduction ONLY on bright background-like pixels (very strict)
 List<int> _generate(_GenerationArgs args) {
   final bytes = args.bytes;
   final params = args.params;
@@ -57,10 +54,10 @@ List<int> _generate(_GenerationArgs args) {
   decoded = decoded.convert(numChannels: 4);
 
   // --------------------
-  // 1.2) Gentle tuning
+  // 2) Gentle tuning (keep as photo-like as possible)
   // --------------------
-  // Keep small; large saturation/contrast tends to create pepper/noise in 16x16.
-  decoded = img.adjustColor(decoded, saturation: 1.03);
+  // Saturation bump is optional; keep small to avoid shadow crush.
+  decoded = img.adjustColor(decoded, saturation: 1.06);
 
   final double contrast = 1.0 + (params.contrast / 100.0);
   final double brightness = 1.0 + (params.brightness / 100.0);
@@ -71,11 +68,12 @@ List<int> _generate(_GenerationArgs args) {
     brightness: brightness,
   );
 
-  // Background estimate from original (for later pepper logic).
+  // Background estimate from original (for later bg-only noise reduction).
   final bg = _estimateBackgroundColor(decoded);
+  final bool bgIsWhiteish = _isWhiteish(bg, lumMin: 220);
 
   // --------------------
-  // 2) Downscale (photo-like)
+  // 3) Downscale
   // --------------------
   // Step 1: average downscale (reduces sensor noise, preserves tones)
   final mid = img.copyResize(
@@ -86,12 +84,13 @@ List<int> _generate(_GenerationArgs args) {
   );
 
   // Step 2: tiny blur ONLY for Smooth (prevents pepper + alias)
+  // (Too strong blur kills facial features; keep radius=1)
   final midSoft = (params.filter == DraftFilter.smooth)
       ? img.gaussianBlur(mid, radius: 1)
       : mid;
 
   // Step 3: final 16x16
-  final resized = img.copyResize(
+  img.Image work = img.copyResize(
     midSoft,
     width: 16,
     height: 16,
@@ -100,54 +99,43 @@ List<int> _generate(_GenerationArgs args) {
         : img.Interpolation.average,
   );
 
-  // --------------------
-  // 2.5) Near-white cleanup (pre-quantize)
-  // --------------------
-  // This is the single safest anti-speckle step for white studio backgrounds.
-  final cleaned = _forceNearWhiteToWhite(resized, lumThreshold: 246);
+  work = work.convert(numChannels: 4);
 
   // --------------------
-  // 3) Quantize (dot-like, but photo-leaning)
+  // 4) (Optional) near-white cleanup
   // --------------------
-  // - Smooth: higher colors (photo-ish, less crush)
-  // - Crisp: fewer colors (more dot-ish)
-  final int colors = (params.filter == DraftFilter.smooth) ? 48 : 32;
-
-  final quantized = img.quantize(
-    cleaned,
-    numberOfColors: colors,
-    method: img.QuantizeMethod.octree,
-    dither: img.DitherKernel.none, // IMPORTANT: avoid sandstorm in 16x16
-  );
-
-  final qRgba = quantized.convert(numChannels: 4);
+  // Only apply if background is white-ish to avoid accidentally whitening subject.
+  if (bgIsWhiteish) {
+    work = _forceNearWhiteToWhite(work, lumThreshold: 246);
+  }
 
   // --------------------
-  // 3.5) Pepper reduction (very restricted)
+  // 5) Black-speckle reduction (bg-only, very strict)
   // --------------------
-  // Only remove "dark single pixels" that sit in bright background AND are bg-like.
-  final pepperReduced = _reducePepperNoiseBgOnly(
-    qRgba,
-    bg: bg,
-    // “dark dot” threshold
-    darkLumMax: 48,
-    // neighborhood must be very bright
-    brightLumMin: 220,
-    // require many bright neighbors (8-neighborhood)
-    brightNeighborMin: 7,
-    // pixel must be close to estimated background color
-    bgDist2Max: 32 * 32,
-    // replace with pure white (stable for bg)
-    replaceWithWhite: true,
-  );
+  // IMPORTANT:
+  // - Only when bg is white-ish
+  // - Only when the pixel is BOTH:
+  //   a) in a very bright neighborhood
+  //   b) close to bg color (so we don't touch hair/eyes/shadows)
+  if (bgIsWhiteish) {
+    work = _reducePepperNoiseBgOnly(
+      work,
+      bg: bg,
+      darkLumMax: 50,
+      brightLumMin: 220,
+      brightNeighborMin: 7,
+      bgDist2Max: 32 * 32,
+      replaceWithWhite: true,
+    ).convert(numChannels: 4);
+  }
 
   // --------------------
-  // 4) Pack to ARGB32 List<int>(256)
+  // 6) Pack to ARGB32 List<int>(256)
   // --------------------
   final pixels = List<int>.filled(256, 0);
   for (int y = 0; y < 16; y++) {
     for (int x = 0; x < 16; x++) {
-      final p = pepperReduced.getPixel(x, y);
+      final p = work.getPixel(x, y);
       final r = _to8(p.r);
       final g = _to8(p.g);
       final b = _to8(p.b);
@@ -180,19 +168,28 @@ int _dist2Rgb(int r1, int g1, int b1, int r2, int g2, int b2) {
 }
 
 img.Color _estimateBackgroundColor(img.Image src) {
+  // Use corners of original for stable bg estimate.
   final corners = [
     src.getPixel(0, 0),
     src.getPixel(src.width - 1, 0),
     src.getPixel(0, src.height - 1),
     src.getPixel(src.width - 1, src.height - 1),
   ];
+
   int r = 0, g = 0, b = 0;
   for (final p in corners) {
-    r += p.r.toInt();
-    g += p.g.toInt();
-    b += p.b.toInt();
+    r += _to8(p.r);
+    g += _to8(p.g);
+    b += _to8(p.b);
   }
   return img.ColorRgb8((r ~/ 4), (g ~/ 4), (b ~/ 4));
+}
+
+bool _isWhiteish(img.Color c, {required int lumMin}) {
+  final r = _to8(c.r);
+  final g = _to8(c.g);
+  final b = _to8(c.b);
+  return _lum8(r, g, b) >= lumMin;
 }
 
 img.Image _forceNearWhiteToWhite(img.Image src, {required int lumThreshold}) {
@@ -200,9 +197,9 @@ img.Image _forceNearWhiteToWhite(img.Image src, {required int lumThreshold}) {
   for (int y = 0; y < out.height; y++) {
     for (int x = 0; x < out.width; x++) {
       final p = out.getPixel(x, y);
-      final r = p.r.toInt();
-      final g = p.g.toInt();
-      final b = p.b.toInt();
+      final r = _to8(p.r);
+      final g = _to8(p.g);
+      final b = _to8(p.b);
       final lum = _lum8(r, g, b);
       if (lum >= lumThreshold) {
         out.setPixel(x, y, img.ColorRgb8(255, 255, 255));
@@ -225,9 +222,9 @@ img.Image _reducePepperNoiseBgOnly(
 }) {
   final out = img.Image.from(src);
 
-  final br = bg.r.toInt();
-  final bgG = bg.g.toInt();
-  final bb = bg.b.toInt();
+  final br = _to8(bg.r);
+  final bgG = _to8(bg.g);
+  final bb = _to8(bg.b);
 
   const offsets = [
     [-1, -1],
@@ -243,9 +240,9 @@ img.Image _reducePepperNoiseBgOnly(
   for (int y = 0; y < out.height; y++) {
     for (int x = 0; x < out.width; x++) {
       final p = src.getPixel(x, y);
-      final r = p.r.toInt();
-      final g = p.g.toInt();
-      final b = p.b.toInt();
+      final r = _to8(p.r);
+      final g = _to8(p.g);
+      final b = _to8(p.b);
 
       // candidate must be dark
       final lum = _lum8(r, g, b);
@@ -261,8 +258,12 @@ img.Image _reducePepperNoiseBgOnly(
         final nx = x + o[0];
         final ny = y + o[1];
         if (nx < 0 || ny < 0 || nx >= out.width || ny >= out.height) continue;
+
         final np = src.getPixel(nx, ny);
-        final nl = _lum8(np.r.toInt(), np.g.toInt(), np.b.toInt());
+        final nr = _to8(np.r);
+        final ng = _to8(np.g);
+        final nb = _to8(np.b);
+        final nl = _lum8(nr, ng, nb);
         if (nl >= brightLumMin) brightCount++;
       }
       if (brightCount < brightNeighborMin) continue;
@@ -271,16 +272,16 @@ img.Image _reducePepperNoiseBgOnly(
       if (replaceWithWhite) {
         out.setPixel(x, y, img.ColorRgb8(255, 255, 255));
       } else {
-        // neighbor average (not used by default, but kept for flexibility)
+        // neighbor average (kept for flexibility)
         int sumR = 0, sumG = 0, sumB = 0, n = 0;
         for (final o in offsets) {
           final nx = x + o[0];
           final ny = y + o[1];
           if (nx < 0 || ny < 0 || nx >= out.width || ny >= out.height) continue;
           final np = src.getPixel(nx, ny);
-          sumR += np.r.toInt();
-          sumG += np.g.toInt();
-          sumB += np.b.toInt();
+          sumR += _to8(np.r);
+          sumG += _to8(np.g);
+          sumB += _to8(np.b);
           n++;
         }
         if (n > 0) {
