@@ -1,4 +1,3 @@
-import '../../app_config.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../domain/usecase/photo_dot_draft_usecase.dart';
@@ -208,7 +207,7 @@ class _PreviewGrid extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final pixelSize = constraints.maxWidth / AppConfig.dots;
+        final pixelSize = constraints.maxWidth / 16;
         return CustomPaint(
           size: Size(constraints.maxWidth, constraints.maxWidth),
           painter: _PixelPainter(pixels!, pixelSize),
@@ -228,8 +227,8 @@ class _PixelPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     for (int i = 0; i < pixels.length; i++) {
-      final x = (i % AppConfig.dots) * pixelSize;
-      final y = (i ~/ AppConfig.dots) * pixelSize;
+      final x = (i % 16) * pixelSize;
+      final y = (i ~/ 16) * pixelSize;
 
       _paint.color = Color(pixels[i]); // ARGB32
       canvas.drawRect(Rect.fromLTWH(x, y, pixelSize, pixelSize), _paint);

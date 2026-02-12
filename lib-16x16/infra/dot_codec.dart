@@ -1,10 +1,9 @@
-import '../../app_config.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 
 class DotCodec {
-  static const int _pixelCount = AppConfig.dots * AppConfig.dots;
-  static const int _byteSize = _pixelCount * 2;
+  static const int _pixelCount = 256;
+  static const int _byteSize = 512; // 256 pixels * 2 bytes
 
   // --- v3 Implementation ---
 
@@ -109,8 +108,8 @@ class DotCodec {
       final fullPayload = base64Url.decode(padded);
       final totalLen = fullPayload.lengthInBytes;
 
-      // Min length: _byteSize (pix) + 1 (cnt) + 4 (crc)
-      if (totalLen < _byteSize + 5) {
+      // Min length: 512 (pix) + 1 (cnt) + 4 (crc) = 517
+      if (totalLen < 517) {
         throw FormatException('Payload too short: $totalLen');
       }
 
@@ -131,9 +130,9 @@ class DotCodec {
       // Parse Body
       int offset = 0;
 
-      // 1. Pixels (_byteSize bytes)
-      final pixelBytes = body.sublist(offset, offset + _byteSize);
-      offset += _byteSize;
+      // 1. Pixels (512 bytes)
+      final pixelBytes = body.sublist(offset, offset + 512);
+      offset += 512;
 
       final pixelByteData = ByteData.sublistView(pixelBytes);
       final pixels = List<int>.filled(_pixelCount, 0);

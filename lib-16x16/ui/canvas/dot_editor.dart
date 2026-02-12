@@ -1,4 +1,3 @@
-import '../../app_config.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:image_cropper/image_cropper.dart';
@@ -36,13 +35,7 @@ class _DotEditorState extends State<DotEditor> {
   @override
   void initState() {
     super.initState();
-    final int count = AppConfig.dots * AppConfig.dots;
-    // Resize if dimension mismatch (ignore old data content if size changed)
-    if (widget.initialDot.pixels.length != count) {
-      _pixels = List<int>.filled(count, 0);
-    } else {
-      _pixels = List.from(widget.initialDot.pixels);
-    }
+    _pixels = List.from(widget.initialDot.pixels);
   }
 
   void _onPanStart(DragStartDetails details, Size size) {
@@ -96,10 +89,10 @@ class _DotEditorState extends State<DotEditor> {
   }
 
   GridPoint? _getLocalGridPosition(Offset localPosition, Size size) {
-    final double cellSize = size.width / AppConfig.dots;
+    final double cellSize = size.width / 16;
     int x = (localPosition.dx / cellSize).floor();
     int y = (localPosition.dy / cellSize).floor();
-    if (x >= 0 && x < AppConfig.dots && y >= 0 && y < AppConfig.dots) {
+    if (x >= 0 && x < 16 && y >= 0 && y < 16) {
       return GridPoint(x, y);
     }
     return null;
@@ -110,7 +103,7 @@ class _DotEditorState extends State<DotEditor> {
 
     final point = _getLocalGridPosition(localPosition, size);
     if (point == null) return;
-    int index = point.y * AppConfig.dots + point.x;
+    int index = point.y * 16 + point.x;
 
     if (_tool == ToolType.eyedropper) {
       final pickedColorValue = _pixels[index];
@@ -136,7 +129,7 @@ class _DotEditorState extends State<DotEditor> {
     final point = _getLocalGridPosition(localPosition, size);
     if (point == null) return;
 
-    int targetIndex = point.y * AppConfig.dots + point.x;
+    int targetIndex = point.y * 16 + point.x;
     int targetColor = _pixels[targetIndex];
     int replacementColor = _currentColor.value;
 
@@ -153,15 +146,15 @@ class _DotEditorState extends State<DotEditor> {
       int idx = queue.removeAt(0);
       newPixels[idx] = replacementColor;
 
-      int x = idx % AppConfig.dots;
-      int y = idx ~/ AppConfig.dots;
+      int x = idx % 16;
+      int y = idx ~/ 16;
 
       // Neighbors (Up, Down, Left, Right)
       final neighbors = [
-        if (y > 0) (y - 1) * AppConfig.dots + x,
-        if (y < AppConfig.dots - 1) (y + 1) * AppConfig.dots + x,
-        if (x > 0) y * AppConfig.dots + (x - 1),
-        if (x < AppConfig.dots - 1) y * AppConfig.dots + (x + 1),
+        if (y > 0) (y - 1) * 16 + x,
+        if (y < 15) (y + 1) * 16 + x,
+        if (x > 0) y * 16 + (x - 1),
+        if (x < 15) y * 16 + (x + 1),
       ];
 
       for (var n in neighbors) {
@@ -190,7 +183,7 @@ class _DotEditorState extends State<DotEditor> {
 
     setState(() {
       for (var p in points) {
-        int idx = p.y * AppConfig.dots + p.x;
+        int idx = p.y * 16 + p.x;
         _pixels[idx] = drawColor;
       }
       _dragStart = null;
@@ -238,7 +231,7 @@ class _DotEditorState extends State<DotEditor> {
       int ix = (centerX + radiusX * getCos(theta)).round();
       int iy = (centerY + radiusY * getSin(theta)).round();
 
-      if (ix >= 0 && ix < AppConfig.dots && iy >= 0 && iy < AppConfig.dots) {
+      if (ix >= 0 && ix < 16 && iy >= 0 && iy < 16) {
         pointsSet.add(GridPoint(ix, iy));
       }
     }
@@ -370,8 +363,7 @@ class _DotEditorState extends State<DotEditor> {
               setState(() {
                 _undoPixels = List.from(_pixels);
                 // Apply new pixels (keep alpha logic consistent if needed, but generated is opaque ARGB)
-                final int count = AppConfig.dots * AppConfig.dots;
-                for (int i = 0; i < count; i++) {
+                for (int i = 0; i < 256; i++) {
                   _pixels[i] = newPixels[i];
                 }
               });
@@ -403,8 +395,7 @@ class _DotEditorState extends State<DotEditor> {
   void _restoreUndo() {
     if (_undoPixels != null) {
       setState(() {
-        final int count = AppConfig.dots * AppConfig.dots;
-        for (int i = 0; i < count; i++) {
+        for (int i = 0; i < 256; i++) {
           _pixels[i] = _undoPixels![i];
         }
         _undoPixels = null;
@@ -566,13 +557,7 @@ class _DotEditorState extends State<DotEditor> {
                 icon: const Icon(Icons.delete),
                 color: Colors.red,
                 onPressed: () {
-                  setState(
-                    () => _pixels.fillRange(
-                      0,
-                      AppConfig.dots * AppConfig.dots,
-                      0,
-                    ),
-                  );
+                  setState(() => _pixels.fillRange(0, 256, 0));
                 },
                 tooltip: 'Clear All',
               ),
@@ -619,7 +604,7 @@ class _DotPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final double cellSize = size.width / AppConfig.dots;
+    final double cellSize = size.width / 16;
     final Paint gridPaint = Paint()
       ..color = Colors.grey.shade400
       ..style = PaintingStyle.stroke;
@@ -629,7 +614,7 @@ class _DotPainter extends CustomPainter {
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
 
     // 2. Draw Grid
-    for (int i = 0; i <= AppConfig.dots; i++) {
+    for (int i = 0; i <= 16; i++) {
       double pos = i * cellSize;
       canvas.drawLine(Offset(pos, 0), Offset(pos, size.height), gridPaint);
       canvas.drawLine(Offset(0, pos), Offset(size.width, pos), gridPaint);
@@ -639,8 +624,8 @@ class _DotPainter extends CustomPainter {
     for (int i = 0; i < pixels.length; i++) {
       int colorValue = pixels[i];
       if (colorValue != 0) {
-        int x = i % AppConfig.dots;
-        int y = i ~/ AppConfig.dots;
+        int x = i % 16;
+        int y = i ~/ 16;
 
         final Paint dotPaint = Paint()
           ..color = Color(colorValue)

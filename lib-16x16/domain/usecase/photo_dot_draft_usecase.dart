@@ -1,4 +1,3 @@
-import '../../app_config.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 
@@ -90,11 +89,11 @@ List<int> _generate(_GenerationArgs args) {
       ? img.gaussianBlur(mid, radius: 1)
       : mid;
 
-  // Step 3: final resize
+  // Step 3: final 16x16
   img.Image work = img.copyResize(
     midSoft,
-    width: AppConfig.dots,
-    height: AppConfig.dots,
+    width: 16,
+    height: 16,
     interpolation: (params.filter == DraftFilter.crisp)
         ? img.Interpolation.nearest
         : img.Interpolation.average,
@@ -131,18 +130,16 @@ List<int> _generate(_GenerationArgs args) {
   }
 
   // --------------------
-  // 6) Pack to ARGB32 List<int>
+  // 6) Pack to ARGB32 List<int>(256)
   // --------------------
-  final int count = AppConfig.dots * AppConfig.dots;
-  final pixels = List<int>.filled(count, 0);
-
-  for (int y = 0; y < AppConfig.dots; y++) {
-    for (int x = 0; x < AppConfig.dots; x++) {
+  final pixels = List<int>.filled(256, 0);
+  for (int y = 0; y < 16; y++) {
+    for (int x = 0; x < 16; x++) {
       final p = work.getPixel(x, y);
       final r = _to8(p.r);
       final g = _to8(p.g);
       final b = _to8(p.b);
-      pixels[y * AppConfig.dots + x] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+      pixels[y * 16 + x] = (0xFF << 24) | (r << 16) | (g << 8) | b;
     }
   }
 

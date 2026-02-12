@@ -1,4 +1,3 @@
-import '../../app_config.dart';
 import 'package:flutter/material.dart';
 import '../../domain/dot_model.dart';
 
@@ -41,7 +40,7 @@ class _PreviewPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     // 16x16 grid
-    final double cellSize = size.width / AppConfig.dots;
+    final double cellSize = size.width / 16;
 
     // Draw background (checkerboard not strictly needed for preview but nice)
     // Simplify for performance: just white background
@@ -51,8 +50,8 @@ class _PreviewPainter extends CustomPainter {
     for (int i = 0; i < pixels.length; i++) {
       final colorValue = pixels[i];
       if (colorValue != 0) {
-        final x = (i % AppConfig.dots) * cellSize;
-        final y = (i ~/ AppConfig.dots) * cellSize;
+        final x = (i % 16) * cellSize;
+        final y = (i ~/ 16) * cellSize;
 
         final paint = Paint()
           ..color = Color(colorValue)
