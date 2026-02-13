@@ -176,4 +176,248 @@ class DotCodec {
       throw FormatException('Invalid v3 payload: $e');
     }
   }
+
+  // --- v4 Implementation ---
+
+  /// Encodes pixels and lineage to v4 payload (Base64URL).
+  ///
+  /// [Header(2): v=4, e=type]
+  /// Type 1 (RGBA5551): [Pixel(512)] + [Count(1)] + [Lineage(16*N)] + [CRC(4)]
+  /// Type 2 (Indexed8): [Pixel(256)] + [Count(1)] + [Lineage(16*N)] + [CRC(4)]
+  static String encodeV4(
+    List<int> argbPixels,
+    List<Uint8List> lineage, {
+    required int encodingType, // 1=RGBA5551, 2=Indexed8
+  }) {
+    if (argbPixels.length != _pixelCount) {
+      throw ArgumentError('Pixel count must be $_pixelCount');
+    }
+
+    // 1. Prepare Body Builder
+    final bodyBuilder = BytesBuilder(copy: false);
+
+    // 2. Add Header (v=4, e=type)
+    bodyBuilder.addByte(4);
+    bodyBuilder.addByte(encodingType);
+
+    // 3. Add Pixels
+    if (encodingType == 1) {
+      // RGBA5551 (512 bytes)
+      for (final argb in argbPixels) {
+        bodyBuilder.add(_argbToRgba5551(argb));
+      }
+    } else if (encodingType == 2) {
+      // Indexed8 (256 bytes)
+      for (final argb in argbPixels) {
+        bodyBuilder.addByte(_argbToIndex8Rgb332(argb));
+      }
+    } else {
+      throw ArgumentError('Unsupported encoding type: $encodingType');
+    }
+
+    // 4. Add Lineage Count & Entries
+    int count = lineage.length;
+    if (count > 255) count = 255; // Max 255 for v4 (byte)
+    bodyBuilder.addByte(count);
+
+    for (int i = 0; i < count; i++) {
+      final entry = lineage[i];
+      if (entry.length == 16) {
+        bodyBuilder.add(entry);
+      } else {
+        // Fallback: truncate or pad
+        final safeEntry = Uint8List(16);
+        final len = entry.length > 16 ? 16 : entry.length;
+        safeEntry.setRange(0, len, entry);
+        bodyBuilder.add(safeEntry);
+      }
+    }
+
+    // 5. Compute CRC32 (Header + Body)
+    final body = bodyBuilder.toBytes();
+    final crc = _computeCrc32(body);
+
+    // 6. Append CRC32
+    final fullBuilder = BytesBuilder(copy: false);
+    fullBuilder.add(body);
+    final crcBytes = ByteData(4)..setUint32(0, crc, Endian.big);
+    fullBuilder.add(crcBytes.buffer.asUint8List());
+
+    // 7. Base64URL Encode (no padding)
+    return base64Url.encode(fullBuilder.toBytes()).replaceAll('=', '');
+  }
+
+  /// Decodes payload with v4 support (fallback to v3).
+  static ({List<int> pixels, List<Uint8List> lineage}) decode(String b64url) {
+    try {
+      return _decodeV4(b64url);
+    } catch (_) {
+      // Fallback to legacy v3
+      return decodeV3(b64url);
+    }
+  }
+
+  static ({List<int> pixels, List<Uint8List> lineage}) _decodeV4(
+    String b64url,
+  ) {
+    // 1. Base64 Decode (restore padding)
+    String padded = b64url;
+    while (padded.length % 4 != 0) {
+      padded += '=';
+    }
+    final fullPayload = base64Url.decode(padded);
+    final totalLen = fullPayload.lengthInBytes;
+
+    // Check minimum length for v4
+    // Header(2) + Count(1) + CRC(4) = 7 (minimum overhead)
+    if (totalLen < 7) {
+      throw FormatException('Payload too short for v4');
+    }
+
+    // 2. Check Header
+    final version = fullPayload[0];
+    final encoding = fullPayload[1];
+
+    if (version != 4) {
+      throw FormatException('Not v4 payload (version=$version)');
+    }
+
+    // 3. Early reject by length based on encoding
+    // e=1(RGBA5551): 2+512+1+4 = 519 (min)
+    // e=2(Indexed8): 2+256+1+4 = 263 (min)
+    int minLen = 0;
+    if (encoding == 1) {
+      minLen = 519;
+    } else if (encoding == 2) {
+      minLen = 263;
+    } else {
+      throw FormatException('Unknown encoding: $encoding');
+    }
+
+    if (totalLen < minLen) {
+      throw FormatException('Payload too short for encoding $encoding');
+    }
+
+    // 4. Verify CRC32
+    final bodyLen = totalLen - 4;
+    final body = fullPayload.sublist(0, bodyLen);
+    final storedCrc = ByteData.sublistView(
+      fullPayload,
+    ).getUint32(bodyLen, Endian.big);
+    final computedCrc = _computeCrc32(body);
+
+    if (storedCrc != computedCrc) {
+      throw FormatException('CRC mismatch in v4');
+    }
+
+    // 5. Parse Pixels
+    int offset = 2; // Skip header
+    final pixels = List<int>.filled(_pixelCount, 0);
+
+    if (encoding == 1) {
+      // RGBA5551
+      final pixelBytes = body.sublist(offset, offset + 512);
+      offset += 512;
+      final byteData = ByteData.sublistView(pixelBytes);
+
+      for (int i = 0; i < _pixelCount; i++) {
+        final v16 = byteData.getUint16(i * 2, Endian.big);
+        pixels[i] = _rgba5551ToArgb(v16);
+      }
+    } else if (encoding == 2) {
+      // Indexed8
+      final pixelBytes = body.sublist(offset, offset + 256);
+      offset += 256;
+
+      for (int i = 0; i < _pixelCount; i++) {
+        final index = pixelBytes[i];
+        pixels[i] = _index8Rgb332ToArgb(index);
+      }
+    }
+
+    // 6. Parse Lineage
+    final count = body[offset];
+    offset += 1;
+
+    final lineage = <Uint8List>[];
+    for (int i = 0; i < count; i++) {
+      if (offset + 16 > bodyLen) {
+        throw FormatException('Lineage truncated');
+      }
+      lineage.add(body.sublist(offset, offset + 16));
+      offset += 16;
+    }
+
+    return (pixels: pixels, lineage: lineage);
+  }
+
+  // --- Helpers ---
+
+  static Uint8List _argbToRgba5551(int argb) {
+    int a = (argb >>> 24) & 0xFF;
+    int v16;
+    if (a == 0) {
+      v16 = 0x0000;
+    } else {
+      int r = (argb >>> 16) & 0xFF;
+      int g = (argb >>> 8) & 0xFF;
+      int b = argb & 0xFF;
+      int r5 = (r >>> 3) & 0x1F;
+      int g5 = (g >>> 3) & 0x1F;
+      int b5 = (b >>> 3) & 0x1F;
+      v16 = (r5 << 11) | (g5 << 6) | (b5 << 1) | 1;
+    }
+    return Uint8List(2)..buffer.asByteData().setUint16(0, v16, Endian.big);
+  }
+
+  static int _rgba5551ToArgb(int v16) {
+    int a = v16 & 1;
+    if (a == 0) return 0x00000000;
+
+    int r5 = (v16 >>> 11) & 0x1F;
+    int g5 = (v16 >>> 6) & 0x1F;
+    int b5 = (v16 >>> 1) & 0x1F;
+
+    // Bit replication for 5->8 bit
+    int r8 = (r5 << 3) | (r5 >>> 2);
+    int g8 = (g5 << 3) | (g5 >>> 2);
+    int b8 = (b5 << 3) | (b5 >>> 2);
+
+    return (0xFF << 24) | (r8 << 16) | (g8 << 8) | b8;
+  }
+
+  static int _argbToIndex8Rgb332(int argb) {
+    final a = (argb >>> 24) & 0xFF;
+    if (a == 0) return 0;
+
+    final r = (argb >>> 16) & 0xFF;
+    final g = (argb >>> 8) & 0xFF;
+    final b = argb & 0xFF;
+
+    final r3 = (r * 7 + 127) ~/ 255;
+    final g3 = (g * 7 + 127) ~/ 255;
+    final b2 = (b * 3 + 127) ~/ 255;
+
+    final v = (r3 << 5) | (g3 << 2) | b2;
+    // index 1..255 (clamp max)
+    int idx = v + 1;
+    if (idx > 255) idx = 255;
+    return idx;
+  }
+
+  static int _index8Rgb332ToArgb(int index) {
+    if (index == 0) return 0x00000000;
+
+    final colorValue = index - 1;
+    final r3 = (colorValue >> 5) & 0x07;
+    final g3 = (colorValue >> 2) & 0x07;
+    final b2 = colorValue & 0x03;
+
+    // Fixed Scaling Logic
+    final r8 = (r3 * 255) ~/ 7;
+    final g8 = (g3 * 255) ~/ 7;
+    final b8 = (b2 * 255) ~/ 3;
+
+    return (0xFF << 24) | (r8 << 16) | (g8 << 8) | b8;
+  }
 }

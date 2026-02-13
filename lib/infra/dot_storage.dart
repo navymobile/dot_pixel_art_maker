@@ -4,6 +4,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../domain/dot_entity.dart';
 import '../domain/dot_model.dart';
 import 'dot_codec.dart';
+import '../../app_config.dart';
 
 class DotStorage {
   static const String _boxName = 'dot_box';
@@ -27,7 +28,18 @@ class DotStorage {
   Future<void> saveDot(DotModel dot, {String? title}) async {
     if (_box == null) await init();
 
-    final payloadV3 = DotCodec.encodeV3(dot.pixels, dot.lineage);
+    String payloadV3;
+    if (AppConfig.pixelEncoding == 'indexed8') {
+      payloadV3 = DotCodec.encodeV4(dot.pixels, dot.lineage, encodingType: 2);
+    } else {
+      // Default to v3 (or v4 RGBA5551 if we wanted to migrate fully,
+      // but for now let's use v3 as default for stability unless 'indexed8' is set.
+      // Or we can use v4 RGBA5551: DotCodec.encodeV4(..., encodingType: 1)
+      // The user request implied switching by config.
+      // If config is 'v3' (default), we stick to encodeV3?
+      // "pixelEncoding が 'indexed8' なら encodeIndex8、それ以外なら既存 encodeV3 を呼ぶ"
+      payloadV3 = DotCodec.encodeV3(dot.pixels, dot.lineage);
+    }
 
     final entity = DotEntity(
       id: dot.id,
@@ -76,7 +88,7 @@ class DotStorage {
   // Helper
   DotModel _toModel(DotEntity entity) {
     try {
-      final result = DotCodec.decodeV3(entity.payload_v3);
+      final result = DotCodec.decode(entity.payload_v3);
 
       return DotModel(
         id: entity.id,

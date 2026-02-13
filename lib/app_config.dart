@@ -2,7 +2,7 @@
 
 class AppConfig {
   // ドット数
-  static const int dots = 25;
+  static const int dots = 21;
 
   // 使用するエンコード
   // rgba5551: encodeV3 を使用
