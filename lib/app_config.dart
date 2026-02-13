@@ -3,4 +3,9 @@
 class AppConfig {
   // ドット数
   static const int dots = 25;
+
+  // 使用するエンコード
+  // rgba5551: encodeV3 を使用
+  // indexed8: encodeIndex8 を使用
+  static const String pixelEncoding = 'indexed8';
 }

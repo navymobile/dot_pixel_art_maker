@@ -89,3 +89,10 @@
   役割: ホーム画面のグリッドアイテム表示
   種別: Widget
   概要: List<int>からドット絵プレビューを軽量に描画し、タップイベントを処理する。
+
+## docs
+
+- spec_dot_codec_v4.md
+  役割: DotCodec v4 仕様書
+  種別: Specification
+  概要: RGBA5551とIndexed8をサポートするデータ構造(v4)と、v3後方互換戦略を定義。
