@@ -425,43 +425,49 @@ class _DotEditorState extends State<DotEditor> {
         children: [
           // 1. Canvas (Expanded)
           Expanded(
-            child: Center(
-              child: AspectRatio(
-                aspectRatio: 1.0,
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final size = Size(
-                      constraints.maxWidth,
-                      constraints.maxHeight,
-                    );
-
-                    List<GridPoint>? previewPoints;
-                    if (_tool == ToolType.circle &&
-                        _dragStart != null &&
-                        _dragEnd != null) {
-                      previewPoints = _calculateCirclePoints(
-                        _dragStart!,
-                        _dragEnd!,
-                        size,
+            child: InteractiveViewer(
+              maxScale: 2.5,
+              minScale: 1.0,
+              panEnabled: false, // 1本指は描画用に通過させる (2本指で移動可能)
+              boundaryMargin: const EdgeInsets.all(300),
+              child: Center(
+                child: AspectRatio(
+                  aspectRatio: 1.0,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final size = Size(
+                        constraints.maxWidth,
+                        constraints.maxHeight,
                       );
-                    }
 
-                    return GestureDetector(
-                      onPanStart: (details) => _onPanStart(details, size),
-                      onPanUpdate: (details) => _onPanUpdate(details, size),
-                      onPanEnd: (details) => _onPanEnd(details, size),
-                      onTapDown: (details) => _onTapDown(details, size),
-                      onTapUp: (details) => _onTapUp(details, size),
-                      child: CustomPaint(
-                        size: size,
-                        painter: _DotPainter(
-                          pixels: _pixels,
-                          previewPoints: previewPoints,
-                          previewColor: _currentColor,
+                      List<GridPoint>? previewPoints;
+                      if (_tool == ToolType.circle &&
+                          _dragStart != null &&
+                          _dragEnd != null) {
+                        previewPoints = _calculateCirclePoints(
+                          _dragStart!,
+                          _dragEnd!,
+                          size,
+                        );
+                      }
+
+                      return GestureDetector(
+                        onPanStart: (details) => _onPanStart(details, size),
+                        onPanUpdate: (details) => _onPanUpdate(details, size),
+                        onPanEnd: (details) => _onPanEnd(details, size),
+                        onTapDown: (details) => _onTapDown(details, size),
+                        onTapUp: (details) => _onTapUp(details, size),
+                        child: CustomPaint(
+                          size: size,
+                          painter: _DotPainter(
+                            pixels: _pixels,
+                            previewPoints: previewPoints,
+                            previewColor: _currentColor,
+                          ),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
               ),
             ),
