@@ -28,24 +28,31 @@ class DotStorage {
   Future<void> saveDot(DotModel dot, {String? title}) async {
     if (_box == null) await init();
 
-    String payloadV3;
-    if (AppConfig.pixelEncoding == 'indexed8') {
-      payloadV3 = DotCodec.encodeV4(dot.pixels, dot.lineage, encodingType: 2);
-    } else {
-      // Default to v3 (or v4 RGBA5551 if we wanted to migrate fully,
-      // but for now let's use v3 as default for stability unless 'indexed8' is set.
-      // Or we can use v4 RGBA5551: DotCodec.encodeV4(..., encodingType: 1)
-      // The user request implied switching by config.
-      // If config is 'v3' (default), we stick to encodeV3?
-      // "pixelEncoding が 'indexed8' なら encodeIndex8、それ以外なら既存 encodeV3 を呼ぶ"
-      payloadV3 = DotCodec.encodeV3(dot.pixels, dot.lineage);
+    String payload;
+    final int encodingType;
+    switch (AppConfig.pixelEncoding) {
+      case 'indexed8':
+        encodingType = 2;
+        break;
+      case 'rgb444':
+        encodingType = 3;
+        break;
+      case 'rgba5551':
+      default:
+        encodingType = 1;
+        break;
     }
+    payload = DotCodec.encodeV5(
+      dot.pixels,
+      dot.lineage,
+      encodingType: encodingType,
+    );
 
     final entity = DotEntity(
       id: dot.id,
       createdAt: dot.createdAt,
       updatedAt: DateTime.now().millisecondsSinceEpoch,
-      payload_v3: payloadV3,
+      payload_v3: payload,
       title: title ?? dot.title,
       gen: dot.gen,
       originalId: dot.originalId,

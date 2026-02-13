@@ -158,6 +158,11 @@ class DotCodec {
       final count = body[offset];
       offset += 1;
 
+      // v3 lineage count guard (max 20)
+      if (count > 20) {
+        throw FormatException('v3 lineage count exceeds limit: $count');
+      }
+
       // 3. Lineage Entries
       final lineage = <Uint8List>[];
       for (int i = 0; i < count; i++) {
@@ -255,34 +260,234 @@ class DotCodec {
     return base64Url.encode(fullBuilder.toBytes()).replaceAll('=', '');
   }
 
-  /// Decodes payload with v4 support (fallback to v3).
-  static ({List<int> pixels, List<Uint8List> lineage}) decode(String b64url) {
-    try {
-      return _decodeV4(b64url);
-    } catch (_) {
-      // Fallback to legacy v3
-      return decodeV3(b64url);
+  // --- v5 Implementation ---
+
+  /// Encodes pixels and lineage to v5 payload (Base64URL).
+  ///
+  /// [Header(4): v=5, e=type, w, h]
+  /// Type 1 (RGBA5551): [Pixel(2*w*h)] + [Count(1)] + [Lineage(16*N)] + [CRC(4)]
+  /// Type 2 (Indexed8): [Pixel(w*h)] + [Count(1)] + [Lineage(16*N)] + [CRC(4)]
+  /// Type 3 (RGB444): [PackedPixels(ceil(w*h*12/8))] + [Count(1)] + [Lineage(16*N)] + [CRC(4)]
+  static String encodeV5(
+    List<int> argbPixels,
+    List<Uint8List> lineage, {
+    required int encodingType, // 1=RGBA5551, 2=Indexed8, 3=RGB444
+  }) {
+    final int dots = AppConfig.dots;
+    final int pixelCount = dots * dots;
+
+    if (argbPixels.length != pixelCount) {
+      throw ArgumentError(
+        'Pixel count mismatch: expected $pixelCount, got ${argbPixels.length}',
+      );
     }
+
+    // 1. Prepare Body Builder
+    final bodyBuilder = BytesBuilder(copy: false);
+
+    // 2. Add Header (v=5, e=type, w, h)
+    bodyBuilder.addByte(5);
+    bodyBuilder.addByte(encodingType);
+    bodyBuilder.addByte(dots); // w
+    bodyBuilder.addByte(dots); // h
+
+    // 3. Add Pixels
+    if (encodingType == 1) {
+      // RGBA5551 (2 bytes per pixel)
+      for (final argb in argbPixels) {
+        bodyBuilder.add(_argbToRgba5551(argb));
+      }
+    } else if (encodingType == 2) {
+      // Indexed8 (1 byte per pixel)
+      for (final argb in argbPixels) {
+        bodyBuilder.addByte(_argbToIndex8Rgb332(argb));
+      }
+    } else if (encodingType == 3) {
+      // RGB444 (12bit packed)
+      final rgb12values = argbPixels.map(_argbToRgb444).toList();
+      bodyBuilder.add(_packRgb444(rgb12values));
+    } else {
+      throw ArgumentError('Unsupported encoding type: $encodingType');
+    }
+
+    // 4. Add Lineage Count & Entries
+    int count = lineage.length;
+    if (count > 255) count = 255;
+    bodyBuilder.addByte(count);
+
+    for (int i = 0; i < count; i++) {
+      final entry = lineage[i];
+      if (entry.length == 16) {
+        bodyBuilder.add(entry);
+      } else {
+        final safeEntry = Uint8List(16);
+        final len = entry.length > 16 ? 16 : entry.length;
+        safeEntry.setRange(0, len, entry);
+        bodyBuilder.add(safeEntry);
+      }
+    }
+
+    // 5. Compute CRC32 (Header + Body)
+    final body = bodyBuilder.toBytes();
+    final crc = _computeCrc32(body);
+
+    // 6. Append CRC32
+    final fullBuilder = BytesBuilder(copy: false);
+    fullBuilder.add(body);
+    final crcBytes = ByteData(4)..setUint32(0, crc, Endian.big);
+    fullBuilder.add(crcBytes.buffer.asUint8List());
+
+    // 7. Base64URL Encode (no padding)
+    return base64Url.encode(fullBuilder.toBytes()).replaceAll('=', '');
   }
 
-  static ({List<int> pixels, List<Uint8List> lineage}) _decodeV4(
-    String b64url,
-  ) {
-    // 1. Base64 Decode (restore padding)
+  /// Decodes payload with v5/v4/v3 support.
+  ///
+  /// Strategy:
+  /// - v==5 → _decodeV5 (CRC mismatch on valid structure = FormatException, NO fallback)
+  /// - v==4 → _decodeV4 (CRC mismatch on valid structure = FormatException, NO fallback)
+  /// - else → decodeV3 (legacy, count>20 = FormatException)
+  static ({List<int> pixels, List<Uint8List> lineage}) decode(String b64url) {
+    // Base64 decode once
     String padded = b64url;
     while (padded.length % 4 != 0) {
       padded += '=';
     }
-    final fullPayload = base64Url.decode(padded);
-    final totalLen = fullPayload.lengthInBytes;
 
-    // Check minimum length for v4
-    // Header(4) + Count(1) + CRC(4) = 9 (minimum overhead)
-    if (totalLen < 9) {
-      throw FormatException('Payload too short for v4');
+    Uint8List fullPayload;
+    try {
+      fullPayload = base64Url.decode(padded);
+    } catch (e) {
+      throw FormatException('Invalid Base64URL: $e');
     }
 
-    // 2. Check Header
+    final totalLen = fullPayload.lengthInBytes;
+    if (totalLen < 5) {
+      throw FormatException('Payload too short: $totalLen');
+    }
+
+    final version = fullPayload[0];
+
+    if (version == 5) {
+      return _decodeV5(fullPayload);
+    } else if (version == 4) {
+      return _decodeV4FromBytes(fullPayload);
+    } else {
+      // Fallback to v3 (headerless)
+      return decodeV3(b64url);
+    }
+  }
+
+  static ({List<int> pixels, List<Uint8List> lineage}) _decodeV5(
+    Uint8List fullPayload,
+  ) {
+    final totalLen = fullPayload.lengthInBytes;
+
+    // Min: Header(4) + Count(1) + CRC(4) = 9
+    if (totalLen < 9) {
+      throw FormatException('v5 payload too short');
+    }
+
+    final version = fullPayload[0];
+    final encoding = fullPayload[1];
+    final width = fullPayload[2];
+    final height = fullPayload[3];
+
+    if (version != 5) {
+      throw FormatException('Not v5 payload (version=$version)');
+    }
+
+    final int pixelCount = width * height;
+
+    // Calculate pixel data length based on encoding
+    int pixelDataLen;
+    if (encoding == 1) {
+      pixelDataLen = pixelCount * 2;
+    } else if (encoding == 2) {
+      pixelDataLen = pixelCount;
+    } else if (encoding == 3) {
+      pixelDataLen = (pixelCount * 12 + 7) ~/ 8;
+    } else {
+      throw FormatException('Unknown v5 encoding: $encoding');
+    }
+
+    final minLen = 4 + pixelDataLen + 1 + 4;
+    if (totalLen < minLen) {
+      throw FormatException(
+        'v5 payload too short for encoding $encoding ($width x $height)',
+      );
+    }
+
+    // Verify CRC32 — mismatch = data corruption, NO fallback
+    final bodyLen = totalLen - 4;
+    final body = fullPayload.sublist(0, bodyLen);
+    final storedCrc = ByteData.sublistView(
+      fullPayload,
+    ).getUint32(bodyLen, Endian.big);
+    final computedCrc = _computeCrc32(body);
+
+    if (storedCrc != computedCrc) {
+      throw FormatException('CRC mismatch in v5 (data corruption)');
+    }
+
+    // Parse Pixels
+    int offset = 4;
+    final pixels = List<int>.filled(pixelCount, 0);
+
+    if (encoding == 1) {
+      // RGBA5551
+      final pixelBytes = body.sublist(offset, offset + pixelDataLen);
+      offset += pixelDataLen;
+      final byteData = ByteData.sublistView(pixelBytes);
+      for (int i = 0; i < pixelCount; i++) {
+        final v16 = byteData.getUint16(i * 2, Endian.big);
+        pixels[i] = _rgba5551ToArgb(v16);
+      }
+    } else if (encoding == 2) {
+      // Indexed8
+      final pixelBytes = body.sublist(offset, offset + pixelDataLen);
+      offset += pixelDataLen;
+      for (int i = 0; i < pixelCount; i++) {
+        pixels[i] = _index8Rgb332ToArgb(pixelBytes[i]);
+      }
+    } else if (encoding == 3) {
+      // RGB444
+      final packedBytes = Uint8List.fromList(
+        body.sublist(offset, offset + pixelDataLen),
+      );
+      offset += pixelDataLen;
+      final rgb12values = _unpackRgb444(packedBytes, pixelCount);
+      for (int i = 0; i < pixelCount; i++) {
+        pixels[i] = _rgb444ToArgb(rgb12values[i]);
+      }
+    }
+
+    // Parse Lineage
+    final count = body[offset];
+    offset += 1;
+
+    final lineage = <Uint8List>[];
+    for (int i = 0; i < count; i++) {
+      if (offset + 16 > bodyLen) {
+        throw FormatException('v5 lineage truncated');
+      }
+      lineage.add(body.sublist(offset, offset + 16));
+      offset += 16;
+    }
+
+    return (pixels: pixels, lineage: lineage);
+  }
+
+  /// v4 decoder that accepts pre-decoded bytes (used by the unified decode method).
+  static ({List<int> pixels, List<Uint8List> lineage}) _decodeV4FromBytes(
+    Uint8List fullPayload,
+  ) {
+    final totalLen = fullPayload.lengthInBytes;
+
+    if (totalLen < 9) {
+      throw FormatException('v4 payload too short');
+    }
+
     final version = fullPayload[0];
     final encoding = fullPayload[1];
     final width = fullPayload[2];
@@ -292,34 +497,25 @@ class DotCodec {
       throw FormatException('Not v4 payload (version=$version)');
     }
 
-    // Calculate expected pixel size
     final int pixelCount = width * height;
 
-    // Check if dimensions match current AppConfig (Optional stricter check, or just allow read)
-    // For specific requirement "preview on canvs", we need to make sure we don't crash
-    // if we try to load a 16x16 into 21x21 canvas.
-    // The DotStorage._toModel logic uses this return. DotModel holds `pixels`.
-    // DotEditor checks `initialDot.pixels.length` vs `AppConfig.dots`.
-    // So reading it as is (whatever w*h is) is correct for the Codec.
-
-    int pixelDataLen = 0;
+    int pixelDataLen;
     if (encoding == 1) {
       pixelDataLen = pixelCount * 2;
     } else if (encoding == 2) {
-      pixelDataLen = pixelCount * 1;
+      pixelDataLen = pixelCount;
     } else {
-      throw FormatException('Unknown encoding: $encoding');
+      throw FormatException('Unknown v4 encoding: $encoding');
     }
 
-    final minLen = 4 + pixelDataLen + 1 + 4; // Header+Pixels+Count+CRC
-
+    final minLen = 4 + pixelDataLen + 1 + 4;
     if (totalLen < minLen) {
       throw FormatException(
-        'Payload too short for encoding $encoding ($width x $height)',
+        'v4 payload too short for encoding $encoding ($width x $height)',
       );
     }
 
-    // 4. Verify CRC32
+    // CRC mismatch = data corruption, NO fallback
     final bodyLen = totalLen - 4;
     final body = fullPayload.sublist(0, bodyLen);
     final storedCrc = ByteData.sublistView(
@@ -328,42 +524,35 @@ class DotCodec {
     final computedCrc = _computeCrc32(body);
 
     if (storedCrc != computedCrc) {
-      throw FormatException('CRC mismatch in v4');
+      throw FormatException('CRC mismatch in v4 (data corruption)');
     }
 
-    // 5. Parse Pixels
-    int offset = 4; // Skip header (v, e, w, h)
+    int offset = 4;
     final pixels = List<int>.filled(pixelCount, 0);
 
     if (encoding == 1) {
-      // RGBA5551
       final pixelBytes = body.sublist(offset, offset + pixelDataLen);
       offset += pixelDataLen;
       final byteData = ByteData.sublistView(pixelBytes);
-
       for (int i = 0; i < pixelCount; i++) {
         final v16 = byteData.getUint16(i * 2, Endian.big);
         pixels[i] = _rgba5551ToArgb(v16);
       }
     } else if (encoding == 2) {
-      // Indexed8
       final pixelBytes = body.sublist(offset, offset + pixelDataLen);
       offset += pixelDataLen;
-
       for (int i = 0; i < pixelCount; i++) {
-        final index = pixelBytes[i];
-        pixels[i] = _index8Rgb332ToArgb(index);
+        pixels[i] = _index8Rgb332ToArgb(pixelBytes[i]);
       }
     }
 
-    // 6. Parse Lineage
     final count = body[offset];
     offset += 1;
 
     final lineage = <Uint8List>[];
     for (int i = 0; i < count; i++) {
       if (offset + 16 > bodyLen) {
-        throw FormatException('Lineage truncated');
+        throw FormatException('v4 lineage truncated');
       }
       lineage.add(body.sublist(offset, offset + 16));
       offset += 16;
@@ -448,6 +637,111 @@ class DotCodec {
     return pixels.map((argb) {
       final idx = _argbToIndex8Rgb332(argb);
       return _index8Rgb332ToArgb(idx);
+    }).toList();
+  }
+
+  // --- RGB444 Helpers ---
+
+  /// ARGB32 → RGB444 (12bit). 0x000 = transparent.
+  static int _argbToRgb444(int argb) {
+    final a = (argb >>> 24) & 0xFF;
+    if (a == 0) return 0x000;
+
+    final r = (argb >>> 16) & 0xFF;
+    final g = (argb >>> 8) & 0xFF;
+    final b = argb & 0xFF;
+
+    final r4 = (r * 15 + 127) ~/ 255;
+    final g4 = (g * 15 + 127) ~/ 255;
+    final b4 = (b * 15 + 127) ~/ 255;
+
+    int rgb12 = (r4 << 8) | (g4 << 4) | b4;
+    // 0x000 is reserved for transparent → substitute with 0x001
+    if (rgb12 == 0x000) rgb12 = 0x001;
+    return rgb12;
+  }
+
+  /// RGB444 (12bit) → ARGB32. 0x000 = transparent.
+  static int _rgb444ToArgb(int rgb12) {
+    if (rgb12 == 0x000) return 0x00000000;
+
+    final r4 = (rgb12 >> 8) & 0x0F;
+    final g4 = (rgb12 >> 4) & 0x0F;
+    final b4 = rgb12 & 0x0F;
+
+    final r8 = (r4 * 255 + 7) ~/ 15;
+    final g8 = (g4 * 255 + 7) ~/ 15;
+    final b8 = (b4 * 255 + 7) ~/ 15;
+
+    return (0xFF << 24) | (r8 << 16) | (g8 << 8) | b8;
+  }
+
+  /// Pack a list of 12-bit values into MSB-first byte stream.
+  /// 2 pixels = 3 bytes. If odd pixel count, last nibble is zero-padded.
+  static Uint8List _packRgb444(List<int> rgb12values) {
+    final pixelCount = rgb12values.length;
+    final byteLen = (pixelCount * 12 + 7) ~/ 8; // ceil(pixelCount * 12 / 8)
+    final result = Uint8List(byteLen);
+
+    int bitOffset = 0;
+    for (final v12 in rgb12values) {
+      // Write 12 bits MSB-first
+      final byteIdx = bitOffset ~/ 8;
+      final bitPos = bitOffset % 8;
+
+      if (bitPos == 0) {
+        // Aligned: v12 starts at bit 0 of byteIdx
+        // byte[n] = top 8 bits, byte[n+1] top nibble = bottom 4 bits
+        result[byteIdx] = (v12 >> 4) & 0xFF;
+        if (byteIdx + 1 < byteLen) {
+          result[byteIdx + 1] = ((v12 & 0x0F) << 4);
+        }
+      } else {
+        // bitPos == 4: v12 starts at bit 4 of byteIdx
+        // byte[n] bottom nibble = top 4 bits, byte[n+1] = bottom 8 bits
+        result[byteIdx] = (result[byteIdx] & 0xF0) | ((v12 >> 8) & 0x0F);
+        if (byteIdx + 1 < byteLen) {
+          result[byteIdx + 1] = v12 & 0xFF;
+        }
+      }
+      bitOffset += 12;
+    }
+    return result;
+  }
+
+  /// Unpack MSB-first packed 12-bit values.
+  static List<int> _unpackRgb444(Uint8List packed, int pixelCount) {
+    final result = List<int>.filled(pixelCount, 0);
+
+    int bitOffset = 0;
+    for (int i = 0; i < pixelCount; i++) {
+      final byteIdx = bitOffset ~/ 8;
+      final bitPos = bitOffset % 8;
+
+      int v12;
+      if (bitPos == 0) {
+        // Aligned: read top 8 bits from byte[n], top 4 bits from byte[n+1]
+        v12 =
+            (packed[byteIdx] << 4) |
+            ((byteIdx + 1 < packed.length ? packed[byteIdx + 1] : 0) >> 4);
+      } else {
+        // bitPos == 4: read bottom 4 bits from byte[n], all 8 bits from byte[n+1]
+        v12 =
+            ((packed[byteIdx] & 0x0F) << 8) |
+            (byteIdx + 1 < packed.length ? packed[byteIdx + 1] : 0);
+      }
+      result[i] = v12 & 0xFFF;
+      bitOffset += 12;
+    }
+    return result;
+  }
+
+  /// Helper to quantize ARGB pixels to RGB444 colors (and back to ARGB).
+  /// Used for previewing how the image will look when saved as RGB444.
+  static List<int> quantizeToRgb444(List<int> pixels) {
+    return pixels.map((argb) {
+      final rgb12 = _argbToRgb444(argb);
+      return _rgb444ToArgb(rgb12);
     }).toList();
   }
 }

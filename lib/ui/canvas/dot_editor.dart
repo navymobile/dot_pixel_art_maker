@@ -277,6 +277,9 @@ class _DotEditorState extends State<DotEditor> {
                       color.value,
                     ]);
                     _currentColor = Color(quantized[0]);
+                  } else if (AppConfig.pixelEncoding == 'rgb444') {
+                    final quantized = DotCodec.quantizeToRgb444([color.value]);
+                    _currentColor = Color(quantized[0]);
                   } else {
                     _currentColor = color;
                   }
@@ -386,12 +389,9 @@ class _DotEditorState extends State<DotEditor> {
                 List<int> appliedPixels = newPixels;
                 // インポート時に設定に合わせて減色プレビューを行う
                 if (AppConfig.pixelEncoding == 'indexed8') {
-                  // infra/dot_codec.dart のヘルパーを利用
-                  // ※ DotCodec は既に import されている前提 (import '../../infra/dot_codec.dart'; が必要だが、
-                  // もし無ければ追加する必要がある。ファイルの先頭を確認すると import '../../infra/dot_codec.dart' は無い。
-                  // import '../../domain/dot_model.dart'; はある。
-                  // infra層への依存を追加する。
                   appliedPixels = DotCodec.quantizeToIndexed8(newPixels);
+                } else if (AppConfig.pixelEncoding == 'rgb444') {
+                  appliedPixels = DotCodec.quantizeToRgb444(newPixels);
                 }
 
                 // Apply new pixels
