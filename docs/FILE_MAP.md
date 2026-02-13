@@ -96,3 +96,8 @@
   役割: DotCodec v4 仕様書
   種別: Specification
   概要: RGBA5551とIndexed8をサポートするデータ構造(v4)と、v3後方互換戦略を定義。
+
+- spec_dot_codec_v5.md
+  役割: DotCodec v5 仕様書
+  種別: Specification
+  概要: v4をベースにRGB444(4096色+0予約透明)を追加。可変長ヘッダ[v,e,w,h]、12bitビットパック、v5→v4→v3フォールバック戦略を定義。

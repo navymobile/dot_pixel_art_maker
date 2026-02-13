@@ -7,5 +7,6 @@ class AppConfig {
   // 使用するエンコード
   // rgba5551: encodeV3 を使用
   // indexed8: encodeIndex8 を使用
-  static const String pixelEncoding = 'indexed8';
+  // rgb444: encodeRgb444 を使用
+  static const String pixelEncoding = 'rgb444';
 }
