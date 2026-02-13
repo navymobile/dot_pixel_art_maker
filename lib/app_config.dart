@@ -2,5 +2,5 @@
 
 class AppConfig {
   // ドット数
-  static const int dots = 21;
+  static const int dots = 25;
 }

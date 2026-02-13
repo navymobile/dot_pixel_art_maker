@@ -97,12 +97,16 @@ class _DotEditorState extends State<DotEditor> {
 
   GridPoint? _getLocalGridPosition(Offset localPosition, Size size) {
     final double cellSize = size.width / AppConfig.dots;
+    // 座標を計算
     int x = (localPosition.dx / cellSize).floor();
     int y = (localPosition.dy / cellSize).floor();
-    if (x >= 0 && x < AppConfig.dots && y >= 0 && y < AppConfig.dots) {
-      return GridPoint(x, y);
-    }
-    return null;
+
+    // 範囲外でも、0〜最大値の間に収める (Clamp)
+    // これにより、少し外側を触っても端のドットとして判定されます
+    x = x.clamp(0, AppConfig.dots - 1);
+    y = y.clamp(0, AppConfig.dots - 1);
+
+    return GridPoint(x, y);
   }
 
   void _updatePixel(Offset localPosition, Size size) {
