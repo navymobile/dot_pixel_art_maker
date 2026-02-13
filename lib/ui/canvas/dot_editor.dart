@@ -271,7 +271,15 @@ class _DotEditorState extends State<DotEditor> {
               pickerColor: _currentColor,
               onColorChanged: (color) {
                 setState(() {
-                  _currentColor = color;
+                  if (AppConfig.pixelEncoding == 'indexed8') {
+                    // Apply quantization immediately
+                    final quantized = DotCodec.quantizeToIndexed8([
+                      color.value,
+                    ]);
+                    _currentColor = Color(quantized[0]);
+                  } else {
+                    _currentColor = color;
+                  }
                   _tool = ToolType.pen; // Switch to pen automatically
                 });
               },
