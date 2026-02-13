@@ -181,33 +181,41 @@ class DotCodec {
 
   /// Encodes pixels and lineage to v4 payload (Base64URL).
   ///
-  /// [Header(2): v=4, e=type]
-  /// Type 1 (RGBA5551): [Pixel(512)] + [Count(1)] + [Lineage(16*N)] + [CRC(4)]
-  /// Type 2 (Indexed8): [Pixel(256)] + [Count(1)] + [Lineage(16*N)] + [CRC(4)]
+  /// [Header(4): v=4, e=type, w, h]
+  /// Type 1 (RGBA5551): [Pixel(2*w*h)] + [Count(1)] + [Lineage(16*N)] + [CRC(4)]
+  /// Type 2 (Indexed8): [Pixel(w*h)] + [Count(1)] + [Lineage(16*N)] + [CRC(4)]
   static String encodeV4(
     List<int> argbPixels,
     List<Uint8List> lineage, {
     required int encodingType, // 1=RGBA5551, 2=Indexed8
   }) {
-    if (argbPixels.length != _pixelCount) {
-      throw ArgumentError('Pixel count must be $_pixelCount');
+    // Current dimension from AppConfig
+    final int dots = AppConfig.dots;
+    final int pixelCount = dots * dots;
+
+    if (argbPixels.length != pixelCount) {
+      throw ArgumentError(
+        'Pixel count mismatch: expected $pixelCount, got ${argbPixels.length}',
+      );
     }
 
     // 1. Prepare Body Builder
     final bodyBuilder = BytesBuilder(copy: false);
 
-    // 2. Add Header (v=4, e=type)
+    // 2. Add Header (v=4, e=type, w, h)
     bodyBuilder.addByte(4);
     bodyBuilder.addByte(encodingType);
+    bodyBuilder.addByte(dots); // w
+    bodyBuilder.addByte(dots); // h
 
     // 3. Add Pixels
     if (encodingType == 1) {
-      // RGBA5551 (512 bytes)
+      // RGBA5551 (2 bytes per pixel)
       for (final argb in argbPixels) {
         bodyBuilder.add(_argbToRgba5551(argb));
       }
     } else if (encodingType == 2) {
-      // Indexed8 (256 bytes)
+      // Indexed8 (1 byte per pixel)
       for (final argb in argbPixels) {
         bodyBuilder.addByte(_argbToIndex8Rgb332(argb));
       }
@@ -217,7 +225,7 @@ class DotCodec {
 
     // 4. Add Lineage Count & Entries
     int count = lineage.length;
-    if (count > 255) count = 255; // Max 255 for v4 (byte)
+    if (count > 255) count = 255; // Max 255
     bodyBuilder.addByte(count);
 
     for (int i = 0; i < count; i++) {
@@ -269,33 +277,46 @@ class DotCodec {
     final totalLen = fullPayload.lengthInBytes;
 
     // Check minimum length for v4
-    // Header(2) + Count(1) + CRC(4) = 7 (minimum overhead)
-    if (totalLen < 7) {
+    // Header(4) + Count(1) + CRC(4) = 9 (minimum overhead)
+    if (totalLen < 9) {
       throw FormatException('Payload too short for v4');
     }
 
     // 2. Check Header
     final version = fullPayload[0];
     final encoding = fullPayload[1];
+    final width = fullPayload[2];
+    final height = fullPayload[3];
 
     if (version != 4) {
       throw FormatException('Not v4 payload (version=$version)');
     }
 
-    // 3. Early reject by length based on encoding
-    // e=1(RGBA5551): 2+512+1+4 = 519 (min)
-    // e=2(Indexed8): 2+256+1+4 = 263 (min)
-    int minLen = 0;
+    // Calculate expected pixel size
+    final int pixelCount = width * height;
+
+    // Check if dimensions match current AppConfig (Optional stricter check, or just allow read)
+    // For specific requirement "preview on canvs", we need to make sure we don't crash
+    // if we try to load a 16x16 into 21x21 canvas.
+    // The DotStorage._toModel logic uses this return. DotModel holds `pixels`.
+    // DotEditor checks `initialDot.pixels.length` vs `AppConfig.dots`.
+    // So reading it as is (whatever w*h is) is correct for the Codec.
+
+    int pixelDataLen = 0;
     if (encoding == 1) {
-      minLen = 519;
+      pixelDataLen = pixelCount * 2;
     } else if (encoding == 2) {
-      minLen = 263;
+      pixelDataLen = pixelCount * 1;
     } else {
       throw FormatException('Unknown encoding: $encoding');
     }
 
+    final minLen = 4 + pixelDataLen + 1 + 4; // Header+Pixels+Count+CRC
+
     if (totalLen < minLen) {
-      throw FormatException('Payload too short for encoding $encoding');
+      throw FormatException(
+        'Payload too short for encoding $encoding ($width x $height)',
+      );
     }
 
     // 4. Verify CRC32
@@ -311,25 +332,25 @@ class DotCodec {
     }
 
     // 5. Parse Pixels
-    int offset = 2; // Skip header
-    final pixels = List<int>.filled(_pixelCount, 0);
+    int offset = 4; // Skip header (v, e, w, h)
+    final pixels = List<int>.filled(pixelCount, 0);
 
     if (encoding == 1) {
       // RGBA5551
-      final pixelBytes = body.sublist(offset, offset + 512);
-      offset += 512;
+      final pixelBytes = body.sublist(offset, offset + pixelDataLen);
+      offset += pixelDataLen;
       final byteData = ByteData.sublistView(pixelBytes);
 
-      for (int i = 0; i < _pixelCount; i++) {
+      for (int i = 0; i < pixelCount; i++) {
         final v16 = byteData.getUint16(i * 2, Endian.big);
         pixels[i] = _rgba5551ToArgb(v16);
       }
     } else if (encoding == 2) {
       // Indexed8
-      final pixelBytes = body.sublist(offset, offset + 256);
-      offset += 256;
+      final pixelBytes = body.sublist(offset, offset + pixelDataLen);
+      offset += pixelDataLen;
 
-      for (int i = 0; i < _pixelCount; i++) {
+      for (int i = 0; i < pixelCount; i++) {
         final index = pixelBytes[i];
         pixels[i] = _index8Rgb332ToArgb(index);
       }
@@ -419,5 +440,14 @@ class DotCodec {
     final b8 = (b2 * 255) ~/ 3;
 
     return (0xFF << 24) | (r8 << 16) | (g8 << 8) | b8;
+  }
+
+  /// Helper to quantize a list of ARGB pixels to Indexed8 colors (and back to ARGB).
+  /// Used for previewing how the image will look when saved as Indexed8.
+  static List<int> quantizeToIndexed8(List<int> pixels) {
+    return pixels.map((argb) {
+      final idx = _argbToIndex8Rgb332(argb);
+      return _index8Rgb332ToArgb(idx);
+    }).toList();
   }
 }

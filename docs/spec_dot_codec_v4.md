@@ -7,39 +7,41 @@
 
 ## データ構造
 
-### 1. ヘッダ (2 bytes)
+### 1. ヘッダ (4 bytes)
 
-先頭の2バイトはバージョンとエンコーディングタイプを識別するために使用する。
+先頭の4バイトはバージョン、エンコーディングタイプ、および画像の寸法を定義する。
 
-| Offset | Len | Type  | Description                                        |
-| :----- | :-- | :---- | :------------------------------------------------- |
-| 0      | 1   | uint8 | **Version (v)**: `4` 固定                          |
-| 1      | 1   | uint8 | **Encoding (e)**: `1` (RGBA5551) or `2` (Indexed8) |
+| Offset | Len | Type  | Description                                         |
+| :----- | :-- | :---- | :-------------------------------------------------- |
+| 0      | 1   | uint8 | **Version (v)**: `4` 固定                           |
+| 1      | 1   | uint8 | **Encoding (e)**: `1` (RGBA5551) or `2` (Indexed8)  |
+| 2      | 1   | uint8 | **Width (w)**: Pixels Width (Example: 16, 21, 25)   |
+| 3      | 1   | uint8 | **Height (h)**: Pixels Height (Example: 16, 21, 25) |
 
 ### 2. ペイロードボディ (Variable Length)
 
 エンコーディングタイプ (`e`) によってサイズと内容が異なるピクセルデータ、および共通の系統情報（Lineage）が含まれる。
 
-#### Type 1: RGBA5551 (Legacy Compatible)
+#### Type 1: RGBA5551 (Variable Dimension)
 
-- **Pixels**: 512 bytes (2 bytes \* 256 pixels)
-- **Pixels**: 512 bytes (2 bytes \* 256 pixels)
+- **Pixels**: `2 * (w * h)` bytes
   - 16-bit integer (RGBA 5-5-5-1) Big Endian
 - **Count**: 1 byte (Lineage count `N`, max 255)
 - **Lineage**: 16 \* `N` bytes (16 bytes per entry)
 
-#### Type 2: Indexed8 (New, High Compression)
+#### Type 2: Indexed8 (Variable Dimension)
 
-- **Pixels**: 256 bytes (1 byte \* 256 pixels)
+- **Pixels**: `1 * (w * h)` bytes
   - 8-bit integer (Index)
-  - `0`: Transparent (Alpha = 0)
-  - `1..255`: RGB332 Quantized Color
-    - Calculate: `1 + (R3<<5 | G3<<2 | B2)`
-    - **Important**: `ColorValue` must be `0..254` (Index `1..255`). If the calculated index exceeds 255 (which is theoretically 256 for pure white if logic is simpler), it must be clamped to 255.
-  - パレットデータはペイロードに含まない（固定ロジックで復元）。
 
-* **Count**: 1 byte (Lineage count `N`, max 255)
-* **Lineage**: 16 \* `N` bytes (16 bytes per entry)
+* `0`: Transparent (Alpha = 0)
+* `1..255`: RGB332 Quantized Color
+  - Calculate: `1 + (R3<<5 | G3<<2 | B2)`
+  - **Important**: `ColorValue` must be `0..254` (Index `1..255`). If the calculated index exceeds 255 (which is theoretically 256 for pure white if logic is simpler), it must be clamped to 255.
+* パレットデータはペイロードに含まない（固定ロジックで復元）。
+
+- **Count**: 1 byte (Lineage count `N`, max 255)
+- **Lineage**: 16 \* `N` bytes (16 bytes per entry)
 
 ### 3. チェックサム (4 bytes)
 
@@ -49,13 +51,13 @@
 | :----- | :-- | :----- | :--------------------------------------------- |
 | End-4  | 4   | uint32 | **CRC32**: Big Endian of Header + Payload Body |
 
-- **計算対象**: ヘッダ(2 bytes) + ペイロードボディの全データ（`data[0 .. totalLayoutLength - 4]`）。
+- **計算対象**: ヘッダ(4 bytes) + ペイロードボディの全データ（`data[0 .. totalLayoutLength - 4]`）。
 - **除外対象**: 自分自身（末尾のCRC32フィールド）。
 
 ## 全体レイアウト
 
 ```
-[ v (1) ][ e (1) ][ Pixels (Var) ][ Count (1) ][ Lineage (16*N) ][ CRC32 (4) ]
+[ v (1) ][ e (1) ][ w (1) ][ h (1) ][ Pixels (Var) ][ Count (1) ][ Lineage (16*N) ][ CRC32 (4) ]
 ```
 
 ## エンコーディング / デコーディング フロー
@@ -64,10 +66,11 @@
 
 1.  `v`=4 をセット。
 2.  指定された `e` (1 or 2) をセット。
-3.  ピクセルデータをエンコードして追加。
-4.  Lineageデータを追加。
-5.  ここまでのバイト列に対して CRC32 を計算し、末尾に付与。
-6.  Base64URL (paddingなし) でエンコード。
+3.  現在の `AppConfig.dots` を `w`, `h` にセット（正方形前提だが分けておく）。
+4.  ピクセルデータをエンコードして追加。
+5.  Lineageデータを追加。
+6.  ここまでのバイト列に対して CRC32 を計算し、末尾に付与。
+7.  Base64URL (paddingなし) でエンコード。
 
 ### Decoding (Strategy)
 
@@ -75,13 +78,16 @@
 
 1.  **Try v4 Decode:**
     - Base64URLデコードを行う。
-    - データ長が最小要件（Header + MinPixels + Count + CRC）を満たすか確認。
-      - `e=1 (RGBA5551)`: 2 + 512 + 1 + 4 = **519 bytes**
-      - `e=2 (Indexed8)`: 2 + 256 + 1 + 4 = **263 bytes**
+    - データ長が最小要件（Header(4) + Count(1) + CRC(4) = 9 bytes）を満たすか確認。
     - 先頭バイトが `4` であるか確認。
+    - `w`, `h` を読み取る。
+    - ピクセルデータ長を計算し、全体サイズが整合するか確認。
+      - `e=1 (RGBA5551)`: 4 + (2*w*h) + 1 + 4 = **9 + 2\*P bytes**
+      - `e=2 (Indexed8)`: 4 + (1*w*h) + 1 + 4 = **9 + P bytes**
     - 末尾の CRC32 を検証（計算対象: 末尾4バイトを除く全データ）。
-    - **CRC一致**: `v4` として確定。`e` の値に従ってピクセルを展開。
-    - **CRC不一致 / 形式不正**: 手順2へ。
+    - **CRC一致**: `v4` として確定。
+      - **注意**: デコードされた `w, h` が現在のアプリ設定と異なる場合、リサイズまたはクリップして読み込む（あるいはエラーとするが、今回はリサイズ/パディングで対応推奨）。
+    * **CRC不一致 / 形式不正**: 手順2へ。
 
 2.  **Fallback to v3 (Legacy) Decode:**
     - 既存の `v3` ロジック（Headerなし、固定512bytesピクセル + ... + CRC）で検証を行う。

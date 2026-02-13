@@ -5,6 +5,7 @@ import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:math' as math;
 import '../../domain/dot_model.dart';
+import '../../infra/dot_codec.dart';
 import '../palette/palette_widget.dart';
 import '../sub/import_photo_sheet.dart';
 
@@ -373,10 +374,26 @@ class _DotEditorState extends State<DotEditor> {
               // 5. Apply with Undo
               setState(() {
                 _undoPixels = List.from(_pixels);
-                // Apply new pixels (keep alpha logic consistent if needed, but generated is opaque ARGB)
+
+                List<int> appliedPixels = newPixels;
+                // インポート時に設定に合わせて減色プレビューを行う
+                if (AppConfig.pixelEncoding == 'indexed8') {
+                  // infra/dot_codec.dart のヘルパーを利用
+                  // ※ DotCodec は既に import されている前提 (import '../../infra/dot_codec.dart'; が必要だが、
+                  // もし無ければ追加する必要がある。ファイルの先頭を確認すると import '../../infra/dot_codec.dart' は無い。
+                  // import '../../domain/dot_model.dart'; はある。
+                  // infra層への依存を追加する。
+                  appliedPixels = DotCodec.quantizeToIndexed8(newPixels);
+                }
+
+                // Apply new pixels
                 final int count = AppConfig.dots * AppConfig.dots;
-                for (int i = 0; i < count; i++) {
-                  _pixels[i] = newPixels[i];
+                // newPixels length should match, but be safe
+                final len = appliedPixels.length < count
+                    ? appliedPixels.length
+                    : count;
+                for (int i = 0; i < len; i++) {
+                  _pixels[i] = appliedPixels[i];
                 }
               });
 
