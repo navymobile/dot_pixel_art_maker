@@ -34,6 +34,10 @@ class _DotEditorState extends State<DotEditor> {
   Offset? _dragStart;
   Offset? _dragEnd;
 
+  // Gesture: pointer tracking for 1-finger vs 2-finger
+  final Set<int> _activePointers = {};
+  bool _isScaling = false;
+
   @override
   void initState() {
     super.initState();
@@ -46,46 +50,38 @@ class _DotEditorState extends State<DotEditor> {
     }
   }
 
-  void _onPanStart(DragStartDetails details, Size size) {
+  // --- Pointer-based handlers (replaces GestureDetector callbacks) ---
+
+  void _handlePointerStart(Offset localPosition, Size size) {
     if (_tool == ToolType.circle) {
-      final pos = _getLocalGridPosition(details.localPosition, size);
+      final pos = _getLocalGridPosition(localPosition, size);
       if (pos != null) {
         setState(() {
-          _dragStart = details.localPosition;
-          _dragEnd = details.localPosition;
+          _dragStart = localPosition;
+          _dragEnd = localPosition;
         });
       }
     } else {
-      _updatePixel(details.localPosition, size);
+      _updatePixel(localPosition, size);
     }
   }
 
-  void _onPanUpdate(DragUpdateDetails details, Size size) {
+  void _handlePointerMove(Offset localPosition, Size size) {
     if (_tool == ToolType.circle) {
       setState(() {
-        _dragEnd = details.localPosition;
+        _dragEnd = localPosition;
       });
     } else {
-      _updatePixel(details.localPosition, size);
+      _updatePixel(localPosition, size);
     }
   }
 
-  void _onPanEnd(DragEndDetails details, Size size) {
+  void _handlePointerEnd(Offset localPosition, Size size) {
     if (_tool == ToolType.circle) {
       _commitCircle(size);
     }
-    _recordColorUsage();
-  }
-
-  void _onTapDown(TapDownDetails details, Size size) {
-    if (_tool != ToolType.circle) {
-      _updatePixel(details.localPosition, size);
-    }
-  }
-
-  void _onTapUp(TapUpDetails details, Size size) {
     if (_tool == ToolType.fill) {
-      _floodFill(details.localPosition, size);
+      _floodFill(localPosition, size);
     }
     _recordColorUsage();
   }
@@ -451,9 +447,9 @@ class _DotEditorState extends State<DotEditor> {
           // 1. Canvas (Expanded)
           Expanded(
             child: InteractiveViewer(
-              maxScale: 2.5,
+              maxScale: 5.0,
               minScale: 1.0,
-              panEnabled: false, // 1本指は描画用に通過させる (2本指で移動可能)
+              panEnabled: true,
               boundaryMargin: const EdgeInsets.all(300),
               child: Center(
                 child: AspectRatio(
@@ -476,12 +472,44 @@ class _DotEditorState extends State<DotEditor> {
                         );
                       }
 
-                      return GestureDetector(
-                        onPanStart: (details) => _onPanStart(details, size),
-                        onPanUpdate: (details) => _onPanUpdate(details, size),
-                        onPanEnd: (details) => _onPanEnd(details, size),
-                        onTapDown: (details) => _onTapDown(details, size),
-                        onTapUp: (details) => _onTapUp(details, size),
+                      return Listener(
+                        onPointerDown: (event) {
+                          _activePointers.add(event.pointer);
+                          if (_activePointers.length >= 2) {
+                            // 2本指検出 → スケーリングモード、描画キャンセル
+                            _isScaling = true;
+                            // 円ツールのプレビューもキャンセル
+                            if (_tool == ToolType.circle) {
+                              setState(() {
+                                _dragStart = null;
+                                _dragEnd = null;
+                              });
+                            }
+                          } else if (!_isScaling) {
+                            // 1本指 → 描画開始
+                            _handlePointerStart(event.localPosition, size);
+                          }
+                        },
+                        onPointerMove: (event) {
+                          if (!_isScaling && _activePointers.length == 1) {
+                            _handlePointerMove(event.localPosition, size);
+                          }
+                        },
+                        onPointerUp: (event) {
+                          _activePointers.remove(event.pointer);
+                          if (_activePointers.isEmpty) {
+                            if (!_isScaling) {
+                              _handlePointerEnd(event.localPosition, size);
+                            }
+                            _isScaling = false;
+                          }
+                        },
+                        onPointerCancel: (event) {
+                          _activePointers.remove(event.pointer);
+                          if (_activePointers.isEmpty) {
+                            _isScaling = false;
+                          }
+                        },
                         child: CustomPaint(
                           size: size,
                           painter: _DotPainter(
