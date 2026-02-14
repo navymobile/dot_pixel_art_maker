@@ -37,6 +37,7 @@ class _DotEditorState extends State<DotEditor> {
   // Gesture: pointer tracking for 1-finger vs 2-finger
   final Set<int> _activePointers = {};
   bool _isScaling = false;
+  bool _wasScaling = false; // 2本指モード終了後、次のDownまで描画開始しないガード
 
   @override
   void initState() {
@@ -446,14 +447,14 @@ class _DotEditorState extends State<DotEditor> {
         children: [
           // 1. Canvas (Expanded)
           Expanded(
-            child: InteractiveViewer(
-              maxScale: 5.0,
-              minScale: 1.0,
-              panEnabled: true,
-              boundaryMargin: const EdgeInsets.all(300),
-              child: Center(
-                child: AspectRatio(
-                  aspectRatio: 1.0,
+            child: Center(
+              child: AspectRatio(
+                aspectRatio: 1.0,
+                child: InteractiveViewer(
+                  maxScale: 5.0,
+                  minScale: 1.0,
+                  panEnabled: false, // 1本指パン無効（2本指zoom時のfocal移動で実質パン）
+                  boundaryMargin: EdgeInsets.zero, // キャンバスの端が表示領域外に出ない
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       final size = Size(
@@ -485,13 +486,17 @@ class _DotEditorState extends State<DotEditor> {
                                 _dragEnd = null;
                               });
                             }
-                          } else if (!_isScaling) {
-                            // 1本指 → 描画開始
+                          } else if (!_isScaling && !_wasScaling) {
+                            // 1本指 & スケーリング直後でない → 描画開始
                             _handlePointerStart(event.localPosition, size);
                           }
+                          // _wasScaling は新しいDown時にリセット
+                          _wasScaling = false;
                         },
                         onPointerMove: (event) {
-                          if (!_isScaling && _activePointers.length == 1) {
+                          if (!_isScaling &&
+                              !_wasScaling &&
+                              _activePointers.length == 1) {
                             _handlePointerMove(event.localPosition, size);
                           }
                         },
@@ -500,6 +505,9 @@ class _DotEditorState extends State<DotEditor> {
                           if (_activePointers.isEmpty) {
                             if (!_isScaling) {
                               _handlePointerEnd(event.localPosition, size);
+                            } else {
+                              // スケーリング終了 → 次のDownまで描画禁止
+                              _wasScaling = true;
                             }
                             _isScaling = false;
                           }
@@ -684,11 +692,11 @@ class _DotPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final double cellSize = size.width / AppConfig.dots;
     final Paint gridPaint = Paint()
-      ..color = Colors.grey.shade400
+      ..color = Colors.grey.shade700
       ..style = PaintingStyle.stroke;
 
     // 1. Draw Solid Background (for transparency)
-    final Paint bgPaint = Paint()..color = Colors.grey.shade100;
+    final Paint bgPaint = Paint()..color = Colors.grey.shade200;
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
 
     // 2. Draw Grid
