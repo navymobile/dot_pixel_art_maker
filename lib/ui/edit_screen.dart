@@ -1,5 +1,6 @@
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter/material.dart';
+import '../../app_config.dart';
 import '../../domain/dot_model.dart';
 import '../../infra/dot_storage.dart';
 import 'canvas/dot_editor.dart';
@@ -113,29 +114,16 @@ class _EditScreenState extends State<EditScreen> {
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                title: const Text('x2 (42x42)'),
+            children: AppConfig.availableScales.map((scale) {
+              final newSize = AppConfig.dots * scale;
+              return ListTile(
+                title: Text('x$scale (${newSize}x$newSize)'),
                 onTap: () {
                   Navigator.pop(context);
-                  _scaleDot(2);
+                  _scaleDot(scale);
                 },
-              ),
-              ListTile(
-                title: const Text('x3 (63x63)'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _scaleDot(3);
-                },
-              ),
-              ListTile(
-                title: const Text('x4 (84x84)'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _scaleDot(4);
-                },
-              ),
-            ],
+              );
+            }).toList(),
           ),
         );
       },
@@ -144,7 +132,7 @@ class _EditScreenState extends State<EditScreen> {
 
   void _scaleDot(int scale) {
     // 1. Calculate new size
-    final int currentSize = 21; // Original size
+    final int currentSize = AppConfig.dots;
     final int newSize = currentSize * scale;
     final int newCount = newSize * newSize;
 

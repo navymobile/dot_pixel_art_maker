@@ -4,6 +4,9 @@ class AppConfig {
   // ドット数
   static const int dots = 21 * 1;
 
+  // スケールアップの倍率リスト（例: [2, 3, 4]）
+  static const List<int> availableScales = [2, 3, 4];
+
   // 使用するエンコード（保存形式)
   // rgba5551: v3 e=1 (RGBA5551, 32768色)
   // indexed8: v4 e=2 (Indexed8, 256色) 不採用
