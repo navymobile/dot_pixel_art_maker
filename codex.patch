@@ -1,0 +1,78 @@
+diff --git a/lib/ui/canvas/dot_editor.dart b/lib/ui/canvas/dot_editor.dart
+index d950a4a5848be8cb184ce4a56dfa76c3629de5b9..5c131465ec1eec6fa2aa32e17f2bfdb1c3c66cf5 100644
+--- a/lib/ui/canvas/dot_editor.dart
++++ b/lib/ui/canvas/dot_editor.dart
+@@ -307,71 +307,72 @@ class _DotEditorState extends State<DotEditor> {
+ 
+       if (ix >= 0 && ix < AppConfig.dots && iy >= 0 && iy < AppConfig.dots) {
+         pointsSet.add(GridPoint(ix, iy));
+       }
+     }
+     return pointsSet.toList();
+   }
+ 
+   double getCos(double t) =>
+       (t == math.pi / 2 || t == 3 * math.pi / 2) ? 0 : math.cos(t);
+   double getSin(double t) => (t == 0 || t == math.pi) ? 0 : math.sin(t);
+   double widthFactor(double t) => 1.0;
+ 
+   void _save() {
+     final newDot = widget.initialDot.copyWith(pixels: _pixels);
+     widget.onSave(newDot);
+   }
+ 
+   void _showColorPicker() {
+     showDialog(
+       context: context,
+       builder: (context) {
+         return AlertDialog(
+           title: const Text('Pick a color'),
+           content: SingleChildScrollView(
+-            child: HueRingPicker(
++            child: ColorPicker(
+               pickerColor: _currentColor,
+               onColorChanged: (color) {
+                 setState(() {
+                   if (AppConfig.pixelEncoding == 'indexed8') {
+                     // Apply quantization immediately
+                     final quantized = DotCodec.quantizeToIndexed8([
+                       color.value,
+                     ]);
+                     _currentColor = Color(quantized[0]);
+                   } else if (AppConfig.pixelEncoding == 'rgb444') {
+                     final quantized = DotCodec.quantizeToRgb444([color.value]);
+                     _currentColor = Color(quantized[0]);
+                   } else {
+                     _currentColor = color;
+                   }
+                   _tool = ToolType.pen; // Switch to pen automatically
+                 });
+               },
+               enableAlpha: false,
+               displayThumbColor: true,
++              hexInputBar: false,
+             ),
+           ),
+           actions: [
+             TextButton(
+               child: const Text('Done'),
+               onPressed: () {
+                 Navigator.of(context).pop();
+                 // Color is updated in state, usage recorded on next draw or if we want here?
+                 // Specification said "actually used on canvas". So we rely on draw events.
+               },
+             ),
+           ],
+         );
+       },
+     );
+   }
+ 
+   Future<void> _pickAndImportPhoto() async {
+     // 1. Select Source
+     final ImageSource? source = await showModalBottomSheet<ImageSource>(
+       context: context,
+       builder: (context) => SafeArea(
+         child: Column(
+           mainAxisSize: MainAxisSize.min,
+           children: [

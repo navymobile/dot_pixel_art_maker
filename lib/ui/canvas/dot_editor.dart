@@ -78,6 +78,28 @@ class _DotEditorState extends State<DotEditor> {
   }
 
   void _handlePointerStart(Offset localPosition, Size size) {
+    // スポイト: 即時実行（遅延ガード対象外）
+    if (_tool == ToolType.eyedropper) {
+      final point = _getLocalGridPosition(localPosition, size);
+      if (point == null) return;
+      final idx = point.y * AppConfig.dots + point.x;
+      final v = _pixels[idx];
+      if (v != 0) {
+        setState(() {
+          _currentColor = Color(v);
+          _tool = ToolType.pen;
+        });
+      }
+      return;
+    }
+
+    // 塗りつぶし: 即時実行（遅延ガード対象外）
+    if (_tool == ToolType.fill) {
+      _floodFill(localPosition, size);
+      _recordColorUsage();
+      return;
+    }
+
     if (_tool == ToolType.circle) {
       final pos = _getLocalGridPosition(localPosition, size);
       if (pos != null) {
@@ -105,9 +127,7 @@ class _DotEditorState extends State<DotEditor> {
     if (_tool == ToolType.circle) {
       _commitCircle(size);
     }
-    if (_tool == ToolType.fill) {
-      _floodFill(localPosition, size);
-    }
+    // fill は _handlePointerStart で即時実行済みのためここでは不要
     _lastDrawnPoint = null; // Reset interpolation state
     _recordColorUsage();
   }
@@ -133,22 +153,14 @@ class _DotEditorState extends State<DotEditor> {
   }
 
   void _updatePixel(Offset localPosition, Size size) {
-    if (_tool == ToolType.circle || _tool == ToolType.fill) return;
+    // スポイト・塗りつぶしは _handlePointerStart で即時処理済み
+    if (_tool == ToolType.circle ||
+        _tool == ToolType.fill ||
+        _tool == ToolType.eyedropper)
+      return;
 
     final point = _getLocalGridPosition(localPosition, size);
     if (point == null) return;
-
-    if (_tool == ToolType.eyedropper) {
-      int index = point.y * AppConfig.dots + point.x;
-      final pickedColorValue = _pixels[index];
-      if (pickedColorValue != 0) {
-        setState(() {
-          _currentColor = Color(pickedColorValue);
-          _tool = ToolType.pen;
-        });
-      }
-      return;
-    }
 
     int newColorValue = _tool == ToolType.eraser ? 0 : _currentColor.value;
 
@@ -553,24 +565,31 @@ class _DotEditorState extends State<DotEditor> {
                               });
                             }
                           } else if (!_isScaling && !_wasScaling) {
-                            // 1本指 & スケーリング直後でない → 遅延後に描画開始
-                            _pendingStartPosition = event.localPosition;
-                            _pendingSize = size;
-                            _drawingStarted = false;
-                            _drawDelayTimer = Timer(
-                              const Duration(milliseconds: 50),
-                              () {
-                                // 50ms経過、まだ1本指なら描画開始
-                                if (!_isScaling &&
-                                    _activePointers.length == 1) {
-                                  _drawingStarted = true;
-                                  _handlePointerStart(
-                                    _pendingStartPosition!,
-                                    _pendingSize!,
-                                  );
-                                }
-                              },
-                            );
+                            // スポイト・塗りつぶしは即時実行（遅延ガード不要）
+                            if (_tool == ToolType.eyedropper ||
+                                _tool == ToolType.fill) {
+                              _drawingStarted = true;
+                              _handlePointerStart(event.localPosition, size);
+                            } else {
+                              // ペン・消しゴム・円: 遅延後に描画開始
+                              _pendingStartPosition = event.localPosition;
+                              _pendingSize = size;
+                              _drawingStarted = false;
+                              _drawDelayTimer = Timer(
+                                const Duration(milliseconds: 50),
+                                () {
+                                  // 50ms経過、まだ1本指なら描画開始
+                                  if (!_isScaling &&
+                                      _activePointers.length == 1) {
+                                    _drawingStarted = true;
+                                    _handlePointerStart(
+                                      _pendingStartPosition!,
+                                      _pendingSize!,
+                                    );
+                                  }
+                                },
+                              );
+                            }
                           }
                           // _wasScaling は新しいDown時にリセット
                           _wasScaling = false;
