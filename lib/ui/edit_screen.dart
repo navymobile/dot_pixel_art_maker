@@ -69,12 +69,23 @@ class _EditScreenState extends State<EditScreen> {
           ),
           actions: [
             IconButton(
+              icon: const Icon(Symbols.save),
+              tooltip: 'Save',
+              onPressed: _editorController.save,
+            ),
+            IconButton(
+              icon: const Icon(Symbols.photo_camera),
+              tooltip: 'Import from Photo',
+              onPressed: _editorController.importPhoto,
+            ),
+            IconButton(
               icon: const Icon(Symbols.open_in_full),
               tooltip: 'Resize Canvas',
               onPressed: () {
                 _showScalingSheet(context);
               },
             ),
+            const SizedBox(width: 4),
           ],
         ),
         body: Column(
