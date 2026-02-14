@@ -1,3 +1,4 @@
+import 'dart:async';
 import '../../app_config.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
@@ -39,6 +40,15 @@ class _DotEditorState extends State<DotEditor> {
   bool _isScaling = false;
   bool _wasScaling = false; // 2本指モード終了後、次のDownまで描画開始しないガード
 
+  // Touch delay guard: prevent accidental drawing when starting pinch
+  Timer? _drawDelayTimer;
+  bool _drawingStarted = false; // true after delay elapsed, drawing is active
+  Offset? _pendingStartPosition; // PointerDown position held during delay
+  Size? _pendingSize; // Canvas size held during delay
+
+  // Drawing: last drawn grid point for Bresenham interpolation
+  GridPoint? _lastDrawnPoint;
+
   @override
   void initState() {
     super.initState();
@@ -51,7 +61,21 @@ class _DotEditorState extends State<DotEditor> {
     }
   }
 
+  @override
+  void dispose() {
+    _drawDelayTimer?.cancel();
+    super.dispose();
+  }
+
   // --- Pointer-based handlers (replaces GestureDetector callbacks) ---
+
+  /// Cancel any pending draw delay timer.
+  void _cancelDrawDelay() {
+    _drawDelayTimer?.cancel();
+    _drawDelayTimer = null;
+    _pendingStartPosition = null;
+    _pendingSize = null;
+  }
 
   void _handlePointerStart(Offset localPosition, Size size) {
     if (_tool == ToolType.circle) {
@@ -84,6 +108,7 @@ class _DotEditorState extends State<DotEditor> {
     if (_tool == ToolType.fill) {
       _floodFill(localPosition, size);
     }
+    _lastDrawnPoint = null; // Reset interpolation state
     _recordColorUsage();
   }
 
@@ -112,9 +137,9 @@ class _DotEditorState extends State<DotEditor> {
 
     final point = _getLocalGridPosition(localPosition, size);
     if (point == null) return;
-    int index = point.y * AppConfig.dots + point.x;
 
     if (_tool == ToolType.eyedropper) {
+      int index = point.y * AppConfig.dots + point.x;
       final pickedColorValue = _pixels[index];
       if (pickedColorValue != 0) {
         setState(() {
@@ -127,11 +152,51 @@ class _DotEditorState extends State<DotEditor> {
 
     int newColorValue = _tool == ToolType.eraser ? 0 : _currentColor.value;
 
-    if (_pixels[index] != newColorValue) {
-      setState(() {
-        _pixels[index] = newColorValue;
-      });
+    // Bresenham interpolation: fill all cells between last and current point
+    final points = _lastDrawnPoint != null
+        ? _bresenhamLine(_lastDrawnPoint!, point)
+        : [point];
+
+    bool changed = false;
+    for (var p in points) {
+      int idx = p.y * AppConfig.dots + p.x;
+      if (_pixels[idx] != newColorValue) {
+        _pixels[idx] = newColorValue;
+        changed = true;
+      }
     }
+    if (changed) {
+      setState(() {});
+    }
+    _lastDrawnPoint = point;
+  }
+
+  /// Bresenham's line algorithm — returns all grid cells between two points.
+  List<GridPoint> _bresenhamLine(GridPoint from, GridPoint to) {
+    final List<GridPoint> result = [];
+    int x0 = from.x, y0 = from.y;
+    int x1 = to.x, y1 = to.y;
+
+    int dx = (x1 - x0).abs();
+    int dy = (y1 - y0).abs();
+    int sx = x0 < x1 ? 1 : -1;
+    int sy = y0 < y1 ? 1 : -1;
+    int err = dx - dy;
+
+    while (true) {
+      result.add(GridPoint(x0, y0));
+      if (x0 == x1 && y0 == y1) break;
+      int e2 = 2 * err;
+      if (e2 > -dy) {
+        err -= dy;
+        x0 += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y0 += sy;
+      }
+    }
+    return result;
   }
 
   void _floodFill(Offset localPosition, Size size) {
@@ -479,6 +544,7 @@ class _DotEditorState extends State<DotEditor> {
                           if (_activePointers.length >= 2) {
                             // 2本指検出 → スケーリングモード、描画キャンセル
                             _isScaling = true;
+                            _cancelDrawDelay(); // 遅延中の描画をキャンセル
                             // 円ツールのプレビューもキャンセル
                             if (_tool == ToolType.circle) {
                               setState(() {
@@ -487,8 +553,24 @@ class _DotEditorState extends State<DotEditor> {
                               });
                             }
                           } else if (!_isScaling && !_wasScaling) {
-                            // 1本指 & スケーリング直後でない → 描画開始
-                            _handlePointerStart(event.localPosition, size);
+                            // 1本指 & スケーリング直後でない → 遅延後に描画開始
+                            _pendingStartPosition = event.localPosition;
+                            _pendingSize = size;
+                            _drawingStarted = false;
+                            _drawDelayTimer = Timer(
+                              const Duration(milliseconds: 50),
+                              () {
+                                // 50ms経過、まだ1本指なら描画開始
+                                if (!_isScaling &&
+                                    _activePointers.length == 1) {
+                                  _drawingStarted = true;
+                                  _handlePointerStart(
+                                    _pendingStartPosition!,
+                                    _pendingSize!,
+                                  );
+                                }
+                              },
+                            );
                           }
                           // _wasScaling は新しいDown時にリセット
                           _wasScaling = false;
@@ -496,26 +578,31 @@ class _DotEditorState extends State<DotEditor> {
                         onPointerMove: (event) {
                           if (!_isScaling &&
                               !_wasScaling &&
-                              _activePointers.length == 1) {
+                              _activePointers.length == 1 &&
+                              _drawingStarted) {
                             _handlePointerMove(event.localPosition, size);
                           }
                         },
                         onPointerUp: (event) {
                           _activePointers.remove(event.pointer);
                           if (_activePointers.isEmpty) {
-                            if (!_isScaling) {
+                            _cancelDrawDelay();
+                            if (!_isScaling && _drawingStarted) {
                               _handlePointerEnd(event.localPosition, size);
-                            } else {
+                            } else if (_isScaling) {
                               // スケーリング終了 → 次のDownまで描画禁止
                               _wasScaling = true;
                             }
                             _isScaling = false;
+                            _drawingStarted = false;
                           }
                         },
                         onPointerCancel: (event) {
                           _activePointers.remove(event.pointer);
                           if (_activePointers.isEmpty) {
+                            _cancelDrawDelay();
                             _isScaling = false;
+                            _drawingStarted = false;
                           }
                         },
                         child: CustomPaint(
@@ -696,15 +783,22 @@ class _DotPainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
 
     // 1. Draw Solid Background (for transparency)
-    final Paint bgPaint = Paint()..color = Colors.grey.shade200;
+    final Paint bgPaint = Paint()..color = Colors.grey.shade100;
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
 
-    // 2. Draw Grid
-    for (int i = 0; i <= AppConfig.dots; i++) {
-      double pos = i * cellSize;
-      canvas.drawLine(Offset(pos, 0), Offset(pos, size.height), gridPaint);
-      canvas.drawLine(Offset(0, pos), Offset(size.width, pos), gridPaint);
-    }
+    // 2. Draw Center Guide (cross at row 11 / col 11, i.e. index 10)
+    final Paint guidePaint = Paint()..color = Colors.grey.shade200;
+    final int center = AppConfig.dots ~/ 2; // 10 for 21x21
+    // Horizontal band (row 10)
+    canvas.drawRect(
+      Rect.fromLTWH(0, center * cellSize, size.width, cellSize),
+      guidePaint,
+    );
+    // Vertical band (col 10)
+    canvas.drawRect(
+      Rect.fromLTWH(center * cellSize, 0, cellSize, size.height),
+      guidePaint,
+    );
 
     // 3. Draw Dots
     for (int i = 0; i < pixels.length; i++) {
@@ -744,6 +838,20 @@ class _DotPainter extends CustomPainter {
         );
       }
     }
+
+    // 5. Draw Grid (inner dividers only, skip outer edges — drawn AFTER dots)
+    for (int i = 1; i < AppConfig.dots; i++) {
+      double pos = i * cellSize;
+      canvas.drawLine(Offset(pos, 0), Offset(pos, size.height), gridPaint);
+      canvas.drawLine(Offset(0, pos), Offset(size.width, pos), gridPaint);
+    }
+
+    // 6. Draw Outer Border
+    final Paint borderPaint = Paint()
+      ..color = Colors.grey.shade700
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0;
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), borderPaint);
   }
 
   @override

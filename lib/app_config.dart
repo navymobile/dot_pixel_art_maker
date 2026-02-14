@@ -8,5 +8,5 @@ class AppConfig {
   // rgba5551: v5 e=1 (RGBA5551, 32768色)
   // indexed8: v5 e=2 (Indexed8, 256色)
   // rgb444:   v5 e=3 (RGB444, 4096色)
-  static const String pixelEncoding = 'rgb444';
+  static const String pixelEncoding = 'rgba5551';
 }
