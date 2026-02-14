@@ -11,7 +11,7 @@ depends_on: SPEC_QR_PAYLOAD_V3
 
 # Data & Database Specification v1.2
 
-本仕様書は、16×16ドット絵交換アプリにおけるデータの永続化、データモデル、および整合性担保に関する設計を定義する。
+本仕様書は、ドット絵交換アプリにおけるデータの永続化、データモデル、および整合性担保に関する設計を定義する。
 本仕様は **QR Payload Specification v3** を前提とし、そのデータ構造と整合性を保つことを最優先とする。
 
 ## 1. Scope / Non-goals

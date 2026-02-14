@@ -1,5 +1,6 @@
 import 'dart:async';
 import '../../app_config.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:image_cropper/image_cropper.dart';
@@ -10,11 +11,43 @@ import '../../infra/dot_codec.dart';
 import '../palette/palette_widget.dart';
 import '../sub/import_photo_sheet.dart';
 
+class DotEditorController {
+  VoidCallback? _saveHandler;
+  VoidCallback? _importPhotoHandler;
+
+  void _bind({
+    required VoidCallback onSave,
+    required VoidCallback onImportPhoto,
+  }) {
+    _saveHandler = onSave;
+    _importPhotoHandler = onImportPhoto;
+  }
+
+  void _unbind() {
+    _saveHandler = null;
+    _importPhotoHandler = null;
+  }
+
+  void save() {
+    _saveHandler?.call();
+  }
+
+  void importPhoto() {
+    _importPhotoHandler?.call();
+  }
+}
+
 class DotEditor extends StatefulWidget {
   final DotModel initialDot;
   final Function(DotModel) onSave;
+  final DotEditorController? controller;
 
-  const DotEditor({super.key, required this.initialDot, required this.onSave});
+  const DotEditor({
+    super.key,
+    required this.initialDot,
+    required this.onSave,
+    this.controller,
+  });
 
   @override
   State<DotEditor> createState() => _DotEditorState();
@@ -59,10 +92,24 @@ class _DotEditorState extends State<DotEditor> {
     } else {
       _pixels = List.from(widget.initialDot.pixels);
     }
+    widget.controller?._bind(onSave: _save, onImportPhoto: _pickAndImportPhoto);
+  }
+
+  @override
+  void didUpdateWidget(covariant DotEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?._unbind();
+      widget.controller?._bind(
+        onSave: _save,
+        onImportPhoto: _pickAndImportPhoto,
+      );
+    }
   }
 
   @override
   void dispose() {
+    widget.controller?._unbind();
     _drawDelayTimer?.cancel();
     super.dispose();
   }
@@ -388,12 +435,12 @@ class _DotEditorState extends State<DotEditor> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.camera_alt),
+              leading: const Icon(CupertinoIcons.camera),
               title: const Text('Camera'),
               onTap: () => Navigator.pop(context, ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library),
+              leading: const Icon(CupertinoIcons.rectangle_stack),
               title: const Text('Photo Library'),
               onTap: () => Navigator.pop(context, ImageSource.gallery),
             ),
@@ -644,23 +691,9 @@ class _DotEditorState extends State<DotEditor> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              // Save
-              IconButton(
-                icon: const Icon(Icons.save),
-                color: Colors.blue,
-                onPressed: _save,
-                tooltip: 'Save',
-              ),
-              // Camera
-              IconButton(
-                icon: const Icon(Icons.camera_alt),
-                color: Colors.green,
-                onPressed: _pickAndImportPhoto,
-                tooltip: 'Import from Photo',
-              ),
               // Eyedropper
               IconButton(
-                icon: const Icon(Icons.colorize),
+                icon: const Icon(CupertinoIcons.eyedropper),
                 color: _tool == ToolType.eyedropper
                     ? _currentColor
                     : Colors.grey,
@@ -698,13 +731,13 @@ class _DotEditorState extends State<DotEditor> {
                         width: 2,
                       ),
                     ),
-                    child: Icon(Icons.circle, color: _currentColor),
+                    child: Icon(CupertinoIcons.pencil, color: _currentColor),
                   ),
                 ),
               ),
               // Fill
               IconButton(
-                icon: const Icon(Icons.format_color_fill),
+                icon: const Icon(CupertinoIcons.paintbrush_fill),
                 color: _tool == ToolType.fill ? Colors.black : Colors.grey,
                 onPressed: () => setState(() => _tool = ToolType.fill),
                 tooltip: 'Flood Fill',
@@ -716,7 +749,7 @@ class _DotEditorState extends State<DotEditor> {
               ),
               // Circle
               IconButton(
-                icon: const Icon(Icons.circle_outlined),
+                icon: const Icon(CupertinoIcons.circle),
                 color: _tool == ToolType.circle ? Colors.black : Colors.grey,
                 onPressed: () => setState(() => _tool = ToolType.circle),
                 tooltip: 'Circle Tool',
@@ -728,7 +761,7 @@ class _DotEditorState extends State<DotEditor> {
               ),
               // Eraser
               IconButton(
-                icon: const Icon(Icons.cleaning_services),
+                icon: const Icon(CupertinoIcons.delete_left),
                 color: _tool == ToolType.eraser ? Colors.black : Colors.grey,
                 onPressed: () => setState(() => _tool = ToolType.eraser),
                 tooltip: 'Eraser',
@@ -740,7 +773,7 @@ class _DotEditorState extends State<DotEditor> {
               ),
               // Clear
               IconButton(
-                icon: const Icon(Icons.delete),
+                icon: const Icon(CupertinoIcons.trash),
                 color: Colors.red,
                 onPressed: () {
                   setState(

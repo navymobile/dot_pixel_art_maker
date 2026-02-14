@@ -2,7 +2,7 @@
 
 class AppConfig {
   // ドット数
-  static const int dots = 21;
+  static const int dots = 21 * 2;
 
   // 使用するエンコード (v5 形式で保存)
   // rgba5551: v5 e=1 (RGBA5551, 32768色)
