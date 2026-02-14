@@ -78,7 +78,7 @@ class _PaletteWidgetState extends State<PaletteWidget> {
   }
 
   Future<void> _savePalette() async {
-    final intList = _recentColors.map((c) => c.value).toList();
+    final intList = _recentColors.map((c) => c.toARGB32()).toList();
     await _storage.saveRecentPalette(intList);
   }
 

@@ -11,6 +11,7 @@ class DotModel {
   final int createdAt;
   final int updatedAt;
   final List<Uint8List> lineage;
+  final bool isScanned; // Added to distinguish collected dots
 
   DotModel({
     required this.id,
@@ -21,6 +22,7 @@ class DotModel {
     int? createdAt,
     int? updatedAt,
     this.lineage = const [],
+    this.isScanned = false,
   }) : createdAt = createdAt ?? DateTime.now().millisecondsSinceEpoch,
        updatedAt = updatedAt ?? DateTime.now().millisecondsSinceEpoch;
 
@@ -32,6 +34,7 @@ class DotModel {
       originalId: null, // Self is original
       title: null,
       lineage: const [],
+      isScanned: false,
     );
   }
 
@@ -44,6 +47,7 @@ class DotModel {
       originalId: other.originalId ?? other.id, // Trace back to original
       title: other.title,
       lineage: List.from(other.lineage), // Copy lineage
+      isScanned: true, // Scanned dots are initially marked as scanned
     );
   }
 
@@ -54,6 +58,7 @@ class DotModel {
     String? originalId,
     String? title,
     List<Uint8List>? lineage,
+    bool? isScanned,
   }) {
     return DotModel(
       id: id ?? this.id,
@@ -61,9 +66,10 @@ class DotModel {
       gen: gen ?? this.gen,
       originalId: originalId ?? this.originalId,
       title: title ?? this.title,
-      createdAt: this.createdAt,
+      createdAt: createdAt,
       updatedAt: DateTime.now().millisecondsSinceEpoch,
       lineage: lineage ?? this.lineage,
+      isScanned: isScanned ?? this.isScanned,
     );
   }
 
@@ -76,6 +82,7 @@ class DotModel {
       'title': title,
       'createdAt': createdAt,
       'updatedAt': updatedAt,
+      'isScanned': isScanned,
     };
   }
 

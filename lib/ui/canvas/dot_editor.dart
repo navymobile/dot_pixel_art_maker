@@ -1,6 +1,6 @@
 import 'dart:async';
 import '../../app_config.dart';
-import 'package:flutter/cupertino.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:image_cropper/image_cropper.dart';
@@ -59,8 +59,12 @@ class _DotEditorState extends State<DotEditor> {
   late List<int> _pixels;
   Color _currentColor = Colors.black;
 
-  // Undo state (1 generation for import)
-  List<int>? _undoPixels;
+  // Grid size determined by pixel count
+  late int _gridSize;
+
+  // Undo/Redo Stacks
+  final List<List<int>> _undoStack = [];
+  final List<List<int>> _redoStack = [];
   ToolType _tool = ToolType.pen;
   final PaletteController _paletteController = PaletteController();
 
@@ -85,13 +89,8 @@ class _DotEditorState extends State<DotEditor> {
   @override
   void initState() {
     super.initState();
-    final int count = AppConfig.dots * AppConfig.dots;
-    // Resize if dimension mismatch (ignore old data content if size changed)
-    if (widget.initialDot.pixels.length != count) {
-      _pixels = List<int>.filled(count, 0);
-    } else {
-      _pixels = List.from(widget.initialDot.pixels);
-    }
+    _pixels = List.from(widget.initialDot.pixels);
+    _gridSize = math.sqrt(_pixels.length).toInt(); // Calculate grid size
     widget.controller?._bind(onSave: _save, onImportPhoto: _pickAndImportPhoto);
   }
 
@@ -129,7 +128,7 @@ class _DotEditorState extends State<DotEditor> {
     if (_tool == ToolType.eyedropper) {
       final point = _getLocalGridPosition(localPosition, size);
       if (point == null) return;
-      final idx = point.y * AppConfig.dots + point.x;
+      final idx = point.y * _gridSize + point.x;
       final v = _pixels[idx];
       if (v != 0) {
         setState(() {
@@ -142,6 +141,7 @@ class _DotEditorState extends State<DotEditor> {
 
     // 塗りつぶし: 即時実行（遅延ガード対象外）
     if (_tool == ToolType.fill) {
+      _recordHistory(); // Save state before fill
       _floodFill(localPosition, size);
       _recordColorUsage();
       return;
@@ -156,6 +156,7 @@ class _DotEditorState extends State<DotEditor> {
         });
       }
     } else {
+      _recordHistory(); // Save state before drawing stroke
       _updatePixel(localPosition, size);
     }
   }
@@ -186,15 +187,15 @@ class _DotEditorState extends State<DotEditor> {
   }
 
   GridPoint? _getLocalGridPosition(Offset localPosition, Size size) {
-    final double cellSize = size.width / AppConfig.dots;
+    final double cellSize = size.width / _gridSize;
     // 座標を計算
     int x = (localPosition.dx / cellSize).floor();
     int y = (localPosition.dy / cellSize).floor();
 
     // 範囲外でも、0〜最大値の間に収める (Clamp)
     // これにより、少し外側を触っても端のドットとして判定されます
-    x = x.clamp(0, AppConfig.dots - 1);
-    y = y.clamp(0, AppConfig.dots - 1);
+    x = x.clamp(0, _gridSize - 1);
+    y = y.clamp(0, _gridSize - 1);
 
     return GridPoint(x, y);
   }
@@ -203,13 +204,14 @@ class _DotEditorState extends State<DotEditor> {
     // スポイト・塗りつぶしは _handlePointerStart で即時処理済み
     if (_tool == ToolType.circle ||
         _tool == ToolType.fill ||
-        _tool == ToolType.eyedropper)
+        _tool == ToolType.eyedropper) {
       return;
+    }
 
     final point = _getLocalGridPosition(localPosition, size);
     if (point == null) return;
 
-    int newColorValue = _tool == ToolType.eraser ? 0 : _currentColor.value;
+    int newColorValue = _tool == ToolType.eraser ? 0 : _currentColor.toARGB32();
 
     // Bresenham interpolation: fill all cells between last and current point
     final points = _lastDrawnPoint != null
@@ -218,7 +220,7 @@ class _DotEditorState extends State<DotEditor> {
 
     bool changed = false;
     for (var p in points) {
-      int idx = p.y * AppConfig.dots + p.x;
+      int idx = p.y * _gridSize + p.x;
       if (_pixels[idx] != newColorValue) {
         _pixels[idx] = newColorValue;
         changed = true;
@@ -262,9 +264,9 @@ class _DotEditorState extends State<DotEditor> {
     final point = _getLocalGridPosition(localPosition, size);
     if (point == null) return;
 
-    int targetIndex = point.y * AppConfig.dots + point.x;
+    int targetIndex = point.y * _gridSize + point.x;
     int targetColor = _pixels[targetIndex];
-    int replacementColor = _currentColor.value;
+    int replacementColor = _currentColor.toARGB32();
 
     if (targetColor == replacementColor) return;
 
@@ -279,15 +281,15 @@ class _DotEditorState extends State<DotEditor> {
       int idx = queue.removeAt(0);
       newPixels[idx] = replacementColor;
 
-      int x = idx % AppConfig.dots;
-      int y = idx ~/ AppConfig.dots;
+      int x = idx % _gridSize;
+      int y = idx ~/ _gridSize;
 
       // Neighbors (Up, Down, Left, Right)
       final neighbors = [
-        if (y > 0) (y - 1) * AppConfig.dots + x,
-        if (y < AppConfig.dots - 1) (y + 1) * AppConfig.dots + x,
-        if (x > 0) y * AppConfig.dots + (x - 1),
-        if (x < AppConfig.dots - 1) y * AppConfig.dots + (x + 1),
+        if (y > 0) (y - 1) * _gridSize + x,
+        if (y < _gridSize - 1) (y + 1) * _gridSize + x,
+        if (x > 0) y * _gridSize + (x - 1),
+        if (x < _gridSize - 1) y * _gridSize + (x + 1),
       ];
 
       for (var n in neighbors) {
@@ -306,17 +308,14 @@ class _DotEditorState extends State<DotEditor> {
   void _commitCircle(Size size) {
     if (_dragStart == null || _dragEnd == null) return;
 
-    // We already have logic to get circle pixels in Painter?
-    // No, we need it here to commit to _pixels.
-    // Let's share the logic or duplicate it nicely.
-    // Ideally put it in a helper.
-
     final points = _calculateCirclePoints(_dragStart!, _dragEnd!, size);
-    int drawColor = _currentColor.value;
+    int drawColor = _currentColor.toARGB32();
+
+    _recordHistory(); // Save state before committing circle
 
     setState(() {
       for (var p in points) {
-        int idx = p.y * AppConfig.dots + p.x;
+        int idx = p.y * _gridSize + p.x;
         _pixels[idx] = drawColor;
       }
       _dragStart = null;
@@ -364,7 +363,7 @@ class _DotEditorState extends State<DotEditor> {
       int ix = (centerX + radiusX * getCos(theta)).round();
       int iy = (centerY + radiusY * getSin(theta)).round();
 
-      if (ix >= 0 && ix < AppConfig.dots && iy >= 0 && iy < AppConfig.dots) {
+      if (ix >= 0 && ix < _gridSize && iy >= 0 && iy < _gridSize) {
         pointsSet.add(GridPoint(ix, iy));
       }
     }
@@ -395,11 +394,13 @@ class _DotEditorState extends State<DotEditor> {
                   if (AppConfig.pixelEncoding == 'indexed8') {
                     // Apply quantization immediately
                     final quantized = DotCodec.quantizeToIndexed8([
-                      color.value,
+                      color.toARGB32(),
                     ]);
                     _currentColor = Color(quantized[0]);
                   } else if (AppConfig.pixelEncoding == 'rgb444') {
-                    final quantized = DotCodec.quantizeToRgb444([color.value]);
+                    final quantized = DotCodec.quantizeToRgb444([
+                      color.toARGB32(),
+                    ]);
                     _currentColor = Color(quantized[0]);
                   } else {
                     _currentColor = color;
@@ -435,12 +436,12 @@ class _DotEditorState extends State<DotEditor> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(CupertinoIcons.camera),
+              leading: const Icon(Symbols.photo_camera),
               title: const Text('Camera'),
               onTap: () => Navigator.pop(context, ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(CupertinoIcons.rectangle_stack),
+              leading: const Icon(Symbols.photo_library),
               title: const Text('Photo Library'),
               onTap: () => Navigator.pop(context, ImageSource.gallery),
             ),
@@ -504,38 +505,50 @@ class _DotEditorState extends State<DotEditor> {
             sourceBytes: bytes,
             onApply: (newPixels) {
               // 5. Apply with Undo
+              _recordHistory(); // Save current state
+
               setState(() {
-                _undoPixels = List.from(_pixels);
+                // Ensure new pixels match invalid grid size if needed or resize?
+                // Importing typically resizes to current grid size (21x21).
+                // But ImportPhotoSheet uses AppConfig.dots too.
+                // We should probably respect current _gridSize or allow resize?
+                // For now, if we are in scaled mode (42x42), import might fail or break.
+                // But ImportPhotoSheet logic is hardcoded to AppConfig.dots probably.
+
+                // Let's assume ImportPhotoSheet returns pixels of size AppConfig.dots * AppConfig.dots.
+                // If our _gridSize is different, we have a mismatch.
+                // TODO: Update ImportPhotoSheet to accept gridSize.
+                // For now, if we are in scaled mode (42x42), import might fail or break.
+                // Reverting to AppConfig behavior for import for now.
 
                 List<int> appliedPixels = newPixels;
-                // インポート時に設定に合わせて減色プレビューを行う
                 if (AppConfig.pixelEncoding == 'indexed8') {
                   appliedPixels = DotCodec.quantizeToIndexed8(newPixels);
                 } else if (AppConfig.pixelEncoding == 'rgb444') {
                   appliedPixels = DotCodec.quantizeToRgb444(newPixels);
                 }
 
-                // Apply new pixels
-                final int count = AppConfig.dots * AppConfig.dots;
-                // newPixels length should match, but be safe
-                final len = appliedPixels.length < count
-                    ? appliedPixels.length
-                    : count;
-                for (int i = 0; i < len; i++) {
-                  _pixels[i] = appliedPixels[i];
+                // If import size matches current _gridSize
+                if (appliedPixels.length == _pixels.length) {
+                  _pixels = appliedPixels;
+                } else {
+                  // Fallback: Copy what fits or fill?
+                  // This is an edge case if import resolution differs from editor resolution.
+                  // For now, simple copy logic.
+                  final len = math.min(appliedPixels.length, _pixels.length);
+                  for (var i = 0; i < len; i++) {
+                    _pixels[i] = appliedPixels[i];
+                  }
                 }
               });
 
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: const Text('Imported!'),
-                  action: SnackBarAction(
-                    label: 'UNDO',
-                    onPressed: _restoreUndo,
-                  ),
-                  duration: const Duration(seconds: 4),
+                const SnackBar(
+                  content: Text('Imported!'),
+                  duration: Duration(seconds: 2),
                 ),
               );
+              Navigator.of(context).pop();
             },
           ),
         ),
@@ -550,16 +563,34 @@ class _DotEditorState extends State<DotEditor> {
     }
   }
 
-  void _restoreUndo() {
-    if (_undoPixels != null) {
-      setState(() {
-        final int count = AppConfig.dots * AppConfig.dots;
-        for (int i = 0; i < count; i++) {
-          _pixels[i] = _undoPixels![i];
-        }
-        _undoPixels = null;
-      });
+  void _recordHistory() {
+    // Deep copy current pixels to undo stack
+    if (_undoStack.length >= 50) {
+      _undoStack.removeAt(0); // Limit usage
     }
+    _undoStack.add(List.from(_pixels));
+    // Clear redo stack on new action
+    _redoStack.clear();
+  }
+
+  void _undo() {
+    if (_undoStack.isEmpty) return;
+    setState(() {
+      // Push current to redo
+      _redoStack.add(List.from(_pixels));
+      // Pop from undo
+      _pixels = _undoStack.removeLast();
+    });
+  }
+
+  void _redo() {
+    if (_redoStack.isEmpty) return;
+    setState(() {
+      // Push current to undo
+      _undoStack.add(List.from(_pixels));
+      // Pop from redo
+      _pixels = _redoStack.removeLast();
+    });
   }
 
   @override
@@ -675,6 +706,7 @@ class _DotEditorState extends State<DotEditor> {
                           size: size,
                           painter: _DotPainter(
                             pixels: _pixels,
+                            gridSize: _gridSize,
                             previewPoints: previewPoints,
                             previewColor: _currentColor,
                           ),
@@ -691,11 +723,35 @@ class _DotEditorState extends State<DotEditor> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
+              // Circle
+              IconButton(
+                icon: const Icon(Symbols.circle),
+                color: _tool == ToolType.circle ? Colors.black : Colors.grey,
+                onPressed: () => setState(() => _tool = ToolType.circle),
+                tooltip: 'Circle Tool',
+                style: IconButton.styleFrom(
+                  backgroundColor: _tool == ToolType.circle
+                      ? Colors.grey.shade200
+                      : null,
+                ),
+              ),
+              // Fill
+              IconButton(
+                icon: const Icon(Symbols.format_color_fill),
+                color: _tool == ToolType.fill ? Colors.black : Colors.grey,
+                onPressed: () => setState(() => _tool = ToolType.fill),
+                tooltip: 'Flood Fill',
+                style: IconButton.styleFrom(
+                  backgroundColor: _tool == ToolType.fill
+                      ? Colors.grey.shade200
+                      : null,
+                ),
+              ),
               // Eyedropper
               IconButton(
-                icon: const Icon(CupertinoIcons.eyedropper),
+                icon: const Icon(Symbols.colorize),
                 color: _tool == ToolType.eyedropper
-                    ? _currentColor
+                    ? Colors.black
                     : Colors.grey,
                 onPressed: () => setState(() => _tool = ToolType.eyedropper),
                 tooltip: 'Eyedropper',
@@ -731,37 +787,17 @@ class _DotEditorState extends State<DotEditor> {
                         width: 2,
                       ),
                     ),
-                    child: Icon(CupertinoIcons.pencil, color: _currentColor),
+                    child: Icon(
+                      Symbols.circle,
+                      color: _currentColor,
+                      fill: 1.0,
+                    ),
                   ),
-                ),
-              ),
-              // Fill
-              IconButton(
-                icon: const Icon(CupertinoIcons.paintbrush_fill),
-                color: _tool == ToolType.fill ? Colors.black : Colors.grey,
-                onPressed: () => setState(() => _tool = ToolType.fill),
-                tooltip: 'Flood Fill',
-                style: IconButton.styleFrom(
-                  backgroundColor: _tool == ToolType.fill
-                      ? Colors.grey.shade200
-                      : null,
-                ),
-              ),
-              // Circle
-              IconButton(
-                icon: const Icon(CupertinoIcons.circle),
-                color: _tool == ToolType.circle ? Colors.black : Colors.grey,
-                onPressed: () => setState(() => _tool = ToolType.circle),
-                tooltip: 'Circle Tool',
-                style: IconButton.styleFrom(
-                  backgroundColor: _tool == ToolType.circle
-                      ? Colors.grey.shade200
-                      : null,
                 ),
               ),
               // Eraser
               IconButton(
-                icon: const Icon(CupertinoIcons.delete_left),
+                icon: const Icon(Symbols.ink_eraser),
                 color: _tool == ToolType.eraser ? Colors.black : Colors.grey,
                 onPressed: () => setState(() => _tool = ToolType.eraser),
                 tooltip: 'Eraser',
@@ -771,20 +807,19 @@ class _DotEditorState extends State<DotEditor> {
                       : null,
                 ),
               ),
-              // Clear
+              // Undo
               IconButton(
-                icon: const Icon(CupertinoIcons.trash),
-                color: Colors.red,
-                onPressed: () {
-                  setState(
-                    () => _pixels.fillRange(
-                      0,
-                      AppConfig.dots * AppConfig.dots,
-                      0,
-                    ),
-                  );
-                },
-                tooltip: 'Clear All',
+                icon: const Icon(Symbols.undo),
+                color: _undoStack.isNotEmpty ? Colors.black : Colors.grey,
+                onPressed: _undoStack.isNotEmpty ? _undo : null,
+                tooltip: 'Undo',
+              ),
+              // Redo
+              IconButton(
+                icon: const Icon(Symbols.redo),
+                color: _redoStack.isNotEmpty ? Colors.black : Colors.grey,
+                onPressed: _redoStack.isNotEmpty ? _redo : null,
+                tooltip: 'Redo',
               ),
             ],
           ),
@@ -822,14 +857,20 @@ class GridPoint {
 
 class _DotPainter extends CustomPainter {
   final List<int> pixels;
+  final int gridSize;
   final List<GridPoint>? previewPoints;
   final Color? previewColor;
 
-  _DotPainter({required this.pixels, this.previewPoints, this.previewColor});
+  _DotPainter({
+    required this.pixels,
+    required this.gridSize,
+    this.previewPoints,
+    this.previewColor,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final double cellSize = size.width / AppConfig.dots;
+    final double cellSize = size.width / gridSize;
     final Paint gridPaint = Paint()
       ..color = Colors.grey.shade700
       ..style = PaintingStyle.stroke;
@@ -838,17 +879,19 @@ class _DotPainter extends CustomPainter {
     final Paint bgPaint = Paint()..color = Colors.grey.shade100;
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
 
-    // 2. Draw Center Guide (cross at row 11 / col 11, i.e. index 10)
+    // 2. Draw Center Guide (cross)
+    // Always draw cross at the center, regardless of even/odd grid size
+    final double centerPos = (gridSize / 2) * cellSize;
     final Paint guidePaint = Paint()..color = Colors.grey.shade200;
-    final int center = AppConfig.dots ~/ 2; // 10 for 21x21
-    // Horizontal band (row 10)
+
+    // Horizontal band
     canvas.drawRect(
-      Rect.fromLTWH(0, center * cellSize, size.width, cellSize),
+      Rect.fromLTWH(0, centerPos, size.width, cellSize),
       guidePaint,
     );
-    // Vertical band (col 10)
+    // Vertical band
     canvas.drawRect(
-      Rect.fromLTWH(center * cellSize, 0, cellSize, size.height),
+      Rect.fromLTWH(centerPos, 0, cellSize, size.height),
       guidePaint,
     );
 
@@ -856,8 +899,8 @@ class _DotPainter extends CustomPainter {
     for (int i = 0; i < pixels.length; i++) {
       int colorValue = pixels[i];
       if (colorValue != 0) {
-        int x = i % AppConfig.dots;
-        int y = i ~/ AppConfig.dots;
+        int x = i % gridSize;
+        int y = i ~/ gridSize;
 
         final Paint dotPaint = Paint()
           ..color = Color(colorValue)
@@ -892,7 +935,7 @@ class _DotPainter extends CustomPainter {
     }
 
     // 5. Draw Grid (inner dividers only, skip outer edges — drawn AFTER dots)
-    for (int i = 1; i < AppConfig.dots; i++) {
+    for (int i = 1; i < gridSize; i++) {
       double pos = i * cellSize;
       canvas.drawLine(Offset(pos, 0), Offset(pos, size.height), gridPaint);
       canvas.drawLine(Offset(0, pos), Offset(size.width, pos), gridPaint);

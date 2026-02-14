@@ -21,6 +21,7 @@
           "fill": "#FAFAFA",
           "gap": 8,
           "padding": 16,
+          "justifyContent": "space_between",
           "alignItems": "center",
           "children": [
             {
@@ -35,8 +36,39 @@
             },
             {
               "type": "frame",
+              "id": "dNi2T",
+              "name": "icon save",
+              "width": 40,
+              "height": 40,
+              "cornerRadius": 20,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon_font",
+                  "id": "8TZXj",
+                  "name": "save",
+                  "width": 24,
+                  "height": 24,
+                  "iconFontName": "save",
+                  "iconFontFamily": "Material Symbols Rounded",
+                  "fill": "#49454F"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "yrUCL",
+              "name": "separate",
+              "clip": true,
+              "width": 136,
+              "height": 1,
+              "fill": "#FFFFFF"
+            },
+            {
+              "type": "frame",
               "id": "saJ2n",
-              "name": "QR Button",
+              "name": "icon save",
               "width": 40,
               "height": 40,
               "cornerRadius": 20,
@@ -46,10 +78,10 @@
                 {
                   "type": "icon_font",
                   "id": "Drnib",
-                  "name": "qrIconNew",
+                  "name": "save",
                   "width": 24,
                   "height": 24,
-                  "iconFontName": "qr_code",
+                  "iconFontName": "save",
                   "iconFontFamily": "Material Symbols Rounded",
                   "fill": "#49454F"
                 }
@@ -512,6 +544,7 @@
           "fill": "#FAFAFA",
           "gap": 8,
           "padding": 16,
+          "justifyContent": "space_between",
           "alignItems": "center",
           "children": [
             {
@@ -520,7 +553,7 @@
               "name": "edBackIconNew",
               "width": 24,
               "height": 24,
-              "iconFontName": "arrow_back",
+              "iconFontName": "arrow_back_ios_new",
               "iconFontFamily": "Material Symbols Rounded",
               "fill": "#1C1B1F"
             },
@@ -529,20 +562,88 @@
               "id": "SoVXR",
               "name": "edTitle",
               "fill": "#1C1B1F",
-              "content": "Editor",
+              "textGrowth": "fixed-width",
+              "width": 64,
+              "content": "Edit",
               "fontFamily": "Inter",
               "fontSize": 22,
               "fontWeight": "bold"
             },
             {
-              "type": "text",
-              "id": "AX3bK",
-              "name": "genLabel",
-              "fill": "#49454F",
-              "content": "Gen: 0",
-              "fontFamily": "Inter",
-              "fontSize": 16,
-              "fontWeight": "normal"
+              "type": "frame",
+              "id": "XGAG4",
+              "name": "separate",
+              "clip": true,
+              "width": "fill_container",
+              "height": 1,
+              "fill": "#FFFFFF",
+              "layout": "none"
+            },
+            {
+              "type": "frame",
+              "id": "2enNL",
+              "name": "icon save",
+              "width": 40,
+              "height": 40,
+              "cornerRadius": 20,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon_font",
+                  "id": "TpEEf",
+                  "name": "save",
+                  "width": 24,
+                  "height": 24,
+                  "iconFontName": "save",
+                  "iconFontFamily": "Material Symbols Rounded",
+                  "fill": "#49454F"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "3C4r3",
+              "name": "icon save",
+              "width": 40,
+              "height": 40,
+              "cornerRadius": 20,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon_font",
+                  "id": "bC7ia",
+                  "name": "save",
+                  "width": 24,
+                  "height": 24,
+                  "iconFontName": "photo_camera",
+                  "iconFontFamily": "Material Symbols Rounded",
+                  "fill": "#49454F"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "28wrq",
+              "name": "icon save",
+              "width": 40,
+              "height": 40,
+              "cornerRadius": 20,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon_font",
+                  "id": "v21ZB",
+                  "name": "save",
+                  "width": 24,
+                  "height": 24,
+                  "iconFontName": "open_in_full",
+                  "iconFontFamily": "Material Symbols Rounded",
+                  "fill": "#49454F"
+                }
+              ]
             }
           ]
         },
@@ -674,52 +775,9 @@
               "name": "Toolbar",
               "width": "fill_container",
               "height": 48,
+              "justifyContent": "center",
               "alignItems": "center",
               "children": [
-                {
-                  "type": "frame",
-                  "id": "INNVs",
-                  "name": "tbSave",
-                  "width": 40,
-                  "height": 40,
-                  "cornerRadius": 20,
-                  "justifyContent": "center",
-                  "alignItems": "center",
-                  "children": [
-                    {
-                      "type": "icon_font",
-                      "id": "q2iSk",
-                      "name": "tbSaveIconNew",
-                      "width": 24,
-                      "height": 24,
-                      "iconFontName": "save",
-                      "iconFontFamily": "Material Symbols Rounded",
-                      "fill": "#2196F3"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "cVTCa",
-                  "name": "tbCam",
-                  "width": 40,
-                  "height": 40,
-                  "cornerRadius": 20,
-                  "justifyContent": "center",
-                  "alignItems": "center",
-                  "children": [
-                    {
-                      "type": "icon_font",
-                      "id": "5nWBS",
-                      "name": "tbCamIconNew",
-                      "width": 24,
-                      "height": 24,
-                      "iconFontName": "photo_camera",
-                      "iconFontFamily": "Material Symbols Rounded",
-                      "fill": "#4CAF50"
-                    }
-                  ]
-                },
                 {
                   "type": "frame",
                   "id": "ShKaK",
@@ -737,6 +795,28 @@
                       "width": 24,
                       "height": 24,
                       "iconFontName": "colorize",
+                      "iconFontFamily": "Material Symbols Rounded",
+                      "fill": "#9E9E9E"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "IZ7AC",
+                  "name": "tbFill",
+                  "width": 40,
+                  "height": 40,
+                  "cornerRadius": 20,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon_font",
+                      "id": "6Cnrm",
+                      "name": "tbFillNew",
+                      "width": 24,
+                      "height": 24,
+                      "iconFontName": "format_color_fill",
                       "iconFontFamily": "Material Symbols Rounded",
                       "fill": "#9E9E9E"
                     }
@@ -765,48 +845,6 @@
                 },
                 {
                   "type": "frame",
-                  "id": "IZ7AC",
-                  "name": "tbFill",
-                  "width": 40,
-                  "height": 40,
-                  "cornerRadius": 20,
-                  "justifyContent": "center",
-                  "alignItems": "center",
-                  "children": [
-                    {
-                      "type": "icon_font",
-                      "id": "6Cnrm",
-                      "name": "tbFillNew",
-                      "width": 24,
-                      "height": 24,
-                      "iconFontName": "format_color_fill",
-                      "iconFontFamily": "Material Symbols Rounded",
-                      "fill": "#9E9E9E"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "WBJ1T",
-                  "name": "tbCirc",
-                  "width": 40,
-                  "height": 40,
-                  "cornerRadius": 20,
-                  "justifyContent": "center",
-                  "alignItems": "center",
-                  "children": [
-                    {
-                      "type": "ellipse",
-                      "id": "jk3lt",
-                      "name": "tbCircI",
-                      "fill": "transparent",
-                      "width": 20,
-                      "height": 20
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
                   "id": "2CxfQ",
                   "name": "tbEras",
                   "width": 40,
@@ -821,7 +859,51 @@
                       "name": "tbErasNew",
                       "width": 24,
                       "height": 24,
-                      "iconFontName": "cleaning_services",
+                      "iconFontName": "ink_eraser",
+                      "iconFontFamily": "Material Symbols Rounded",
+                      "fill": "#9E9E9E"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "w5db2",
+                  "name": "tbCircle",
+                  "width": 40,
+                  "height": 40,
+                  "cornerRadius": 20,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon_font",
+                      "id": "FdBoY",
+                      "name": "tbCircle",
+                      "width": 24,
+                      "height": 24,
+                      "iconFontName": "circle",
+                      "iconFontFamily": "Material Symbols Rounded",
+                      "fill": "#9E9E9E"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Ny1zJ",
+                  "name": "tbEras",
+                  "width": 40,
+                  "height": 40,
+                  "cornerRadius": 20,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon_font",
+                      "id": "y0x2e",
+                      "name": "tbErasNew",
+                      "width": 24,
+                      "height": 24,
+                      "iconFontName": "undo",
                       "iconFontFamily": "Material Symbols Rounded",
                       "fill": "#9E9E9E"
                     }

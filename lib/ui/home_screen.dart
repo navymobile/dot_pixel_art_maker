@@ -3,9 +3,11 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../../domain/dot_entity.dart';
 import '../../domain/dot_model.dart';
 import '../../infra/dot_storage.dart';
-import 'sub/dot_grid_item.dart';
+import 'detail_screen.dart';
+import 'exchange/qr_scan_screen.dart';
 import 'edit_screen.dart';
-import 'exchange/exchange_screen.dart';
+import 'sub/dot_grid_body.dart';
+import 'profile/profile_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -16,11 +18,10 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final DotStorage _storage = DotStorage();
-  double _crossAxisCount =
-      4; // Default to 4 (or 5 as per user's last edit, let's stick to 4 or 5? User changed to 4 in edit, but 5 in code snippet? I'll use 5 as default based on their code override but they edited to 4? Let's use 5 as per snippet request 2..8 range). User said "値は2 , 3, 4, 5,6,7,8としてください". I'll default to 5.
+  int _currentIndex = 0;
 
   Future<void> _onFabPressed() async {
-    // Navigate to EditScreen with new Dot
+    // Navigate to EditScreen with new Dot (Directly, for creation)
     await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const EditScreen(dot: null)),
@@ -28,38 +29,37 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _onDotTapped(DotModel dot) async {
-    // Navigate to Editing existing dot
+    // Navigate to DetailScreen
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => EditScreen(dot: dot)),
+      MaterialPageRoute(builder: (context) => DetailScreen(dot: dot)),
     );
   }
 
-  Future<void> _onExchangePressed() async {
-    // For MVP, just use a new blank dot or latest edited?
-    // The previous implementation loaded "latest dot".
-    // Now with multiple dots, we might need to pick one?
-    // User flow: "Exchange button on Home".
-    // If we have dots, maybe use the latest updated one?
-    final dots = _storage.listDots();
-    final targetDot = dots.isNotEmpty ? dots.first : DotModel.create();
-
-    if (!mounted) return;
-
+  Future<void> _onScanPressed() async {
     final DotModel? receivedDot = await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => ExchangeScreen(currentDot: targetDot),
-      ),
+      MaterialPageRoute(builder: (context) => const QrScanScreen()),
     );
 
     if (receivedDot != null) {
       await _storage.saveDot(receivedDot);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Received new Dot! Gen +1')),
+          const SnackBar(content: Text('Received new Dot via QR!')),
         );
       }
+    }
+  }
+
+  void _onTabTapped(int index) {
+    if (index == 2) {
+      // Edit/Create Tab
+      _onFabPressed();
+    } else {
+      setState(() {
+        _currentIndex = index;
+      });
     }
   }
 
@@ -67,125 +67,72 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'My Dots',
-          style: TextStyle(fontWeight: FontWeight.bold),
+        title: Text(
+          _currentIndex == 1 ? 'Collection' : 'My Dots',
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.qr_code),
-            onPressed: _onExchangePressed,
-            tooltip: 'Exchange',
+            icon: const Icon(Icons.qr_code_scanner),
+            onPressed: _onScanPressed,
+            tooltip: 'Scan QR',
           ),
         ],
       ),
       body: ValueListenableBuilder(
         valueListenable: _storage.listen(),
         builder: (context, Box<DotEntity> box, _) {
-          final dots = _storage.listDots();
+          final allDots = _storage.listDots();
 
-          return CustomScrollView(
-            slivers: [
-              // Slider Section (Scrollable)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16.0,
-                    vertical: 8.0,
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.grid_view, size: 20, color: Colors.grey),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Slider(
-                          value: _crossAxisCount,
-                          min: 2,
-                          max: 8,
-                          divisions: 3,
-                          label: _crossAxisCount.round().toString(),
-                          onChanged: (value) {
-                            setState(() {
-                              _crossAxisCount = value;
-                            });
-                          },
-                        ),
-                      ),
-                      Text(
-                        '${_crossAxisCount.round()}',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+          // Filter dots
+          // My Dots: isScanned == false
+          // Collection: isScanned == true
+          // If isScanned is null (legacy), assume false (My Dot)
 
-              // Empty State or Grid
-              if (dots.isEmpty)
-                const SliverFillRemaining(
-                  child: Center(
-                    child: Text(
-                      'No dots yet.\nTap + to create one!',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  ),
-                )
-              else
-                SliverPadding(
-                  padding: const EdgeInsets.only(
-                    left: 16,
-                    right: 16,
-                    bottom: 80, // Space for FAB
-                  ),
-                  sliver: SliverGrid(
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: _crossAxisCount.round(),
-                      crossAxisSpacing: 24 - (_crossAxisCount * 2),
-                      mainAxisSpacing: 24 - (_crossAxisCount * 2),
-                    ),
-                    delegate: SliverChildBuilderDelegate((context, index) {
-                      final dot = dots[index];
-                      return DotGridItem(
-                        dot: dot,
-                        onTap: () => _onDotTapped(dot),
-                      );
-                    }, childCount: dots.length),
-                  ),
-                ),
-            ],
+          List<DotModel> dotsToShow;
+          String emptyMessage;
+
+          if (_currentIndex == 1) {
+            // Collection
+            dotsToShow = allDots.where((d) => d.isScanned == true).toList();
+            emptyMessage =
+                'No scanned dots yet.\nScan a QR code to add to collection!';
+          } else {
+            // Home / My Dots (default)
+            dotsToShow = allDots.where((d) => d.isScanned == false).toList();
+            emptyMessage = 'No dots yet.\nTap + to create one!';
+          }
+
+          // Sort by updated/created descending
+          dotsToShow.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+
+          if (_currentIndex == 3) {
+            return const ProfileScreen();
+          }
+
+          return DotGridBody(
+            dots: dotsToShow,
+            onDotTap: _onDotTapped,
+            emptyMessage: emptyMessage,
           );
         },
       ),
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
-        showSelectedLabels: false,
-        showUnselectedLabels: false,
-        currentIndex: 0, // Always home for now
-        onTap: (index) {
-          switch (index) {
-            case 0:
-              // Home - do nothing or scroll to top
-              break;
-            case 1:
-              // Collection - Placeholder
-              break;
-            case 2:
-              // Edit - Create new dot
-              _onFabPressed();
-              break;
-            case 3:
-              // Profile - Placeholder
-              break;
-          }
-        },
+        showSelectedLabels: true,
+        showUnselectedLabels: true,
+        currentIndex: _currentIndex,
+        onTap: _onTabTapped,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
           BottomNavigationBarItem(
             icon: Icon(Icons.collections),
             label: 'Collection',
           ),
-          BottomNavigationBarItem(icon: Icon(Icons.edit), label: 'Edit'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.add_circle_outline),
+            label: 'Create',
+          ),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
         ],
       ),

@@ -20,7 +20,7 @@ class DotEntityAdapter extends TypeAdapter<DotEntity> {
       id: fields[0] as String,
       createdAt: fields[1] as int,
       updatedAt: fields[2] as int,
-      payload_v3: fields[3] as String,
+      payloadV3: fields[3] as String,
       title: fields[4] as String?,
       gen: fields[5] as int,
       originalId: fields[6] as String?,
@@ -38,7 +38,7 @@ class DotEntityAdapter extends TypeAdapter<DotEntity> {
       ..writeByte(2)
       ..write(obj.updatedAt)
       ..writeByte(3)
-      ..write(obj.payload_v3)
+      ..write(obj.payloadV3)
       ..writeByte(4)
       ..write(obj.title)
       ..writeByte(5)

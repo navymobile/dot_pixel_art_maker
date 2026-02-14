@@ -37,7 +37,9 @@ void main() {
 
       // Tamper with the payload
       String padded = encoded;
-      while (padded.length % 4 != 0) padded += '=';
+      while (padded.length % 4 != 0) {
+        padded += '=';
+      }
       final bytes = base64Url.decode(padded);
 
       // Flip a bit in the pixel data area (byte 0)

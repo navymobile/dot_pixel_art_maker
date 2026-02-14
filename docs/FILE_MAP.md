@@ -50,6 +50,11 @@
   種別: Service
   概要: SharedPreferencesを使用し、最近使ったパレット色などを保存する。
 
+- user_storage.dart
+  役割: ユーザー設定・プロファイル情報の永続化
+  種別: Repository
+  概要: Hiveを使用し、ユーザーアイコン（選択されたドット絵）などを保存する。
+
 ## ui
 
 - home_screen.dart
@@ -61,6 +66,11 @@
   役割: ドット絵作成・編集画面のコンテナ
   種別: Screen
   概要: DotEditorを表示し、AppBarの表示や画面遷移引数の処理を行う。
+
+- detail_screen.dart
+  役割: ドット絵の詳細表示・管理画面
+  種別: Screen
+  概要: ドット絵のプレビュー、削除、編集画面への遷移、エクスポート画面への遷移を行う。
 
 ### ui/canvas
 
@@ -78,10 +88,34 @@
 
 ### ui/exchange
 
-- exchange_screen.dart
-  役割: QRコードによる作品交換画面
+- qr_display_screen.dart
+  役割: 作品QRコード表示画面
   種別: Screen
-  概要: 現在の作品のQR表示と、カメラによる他作品のQRスキャンを行う。
+  概要: 現在の作品（ドット絵＋パレット）をエンコードしてQRコードを表示する。
+
+- qr_scan_screen.dart
+  役割: QRコードスキャン画面
+  種別: Screen
+  概要: カメラでQRコードを読み取り、デコードしてドット絵データを取り込む。
+
+### ui/profile
+
+- profile_screen.dart
+  役割: ユーザープロファイル画面
+  種別: Screen
+  概要: ユーザーアイコンの表示・変更、アプリバージョンの表示を行う。
+
+- dot_selection_screen.dart
+  役割: アイコン用ドット絵選択画面
+  種別: Screen
+  概要: ユーザーが作成したドット絵一覧を表示し、プロファイルアイコンとして選択可能にする。
+
+### ui/export
+
+- export_screen.dart
+  役割: 画像エクスポート画面
+  種別: Screen
+  概要: ドット絵をLINEスタンプ用や汎用サイズ（S/M/L）の透過PNGとして書き出す。
 
 ### ui/sub
 
@@ -89,6 +123,16 @@
   役割: ホーム画面のグリッドアイテム表示
   種別: Widget
   概要: List<int>からドット絵プレビューを軽量に描画し、タップイベントを処理する。
+
+- dot_grid_body.dart
+  役割: ドット絵グリッド表示の共通コンポーネント
+  種別: Widget
+  概要: HomeScreenやDotSelectionScreenで使用される、ドット絵一覧のグリッド表示部分。
+
+- import_photo_sheet.dart
+  役割: 写真取り込み用ボトムシート
+  種別: Widget
+  概要: カメラ/ライブラリから画像を選択し、ドット絵に変換してインポートするUI。
 
 ## docs
 
@@ -101,3 +145,8 @@
   役割: DotCodec v5 仕様書
   種別: Specification
   概要: v4をベースにRGB444(4096色+0予約透明)を追加。可変長ヘッダ[v,e,w,h]、12bitビットパック、v5→v4→v3フォールバック戦略を定義。
+
+- export_spec.md
+  役割: 画像エクスポート機能仕様書
+  種別: Specification
+  概要: LINEスタンプ用（370x320px、余白あり）および汎用エクスポート（正方形、Nearest Neighbor拡大）の仕様定義。

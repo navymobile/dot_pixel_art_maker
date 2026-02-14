@@ -52,7 +52,7 @@ class DotStorage {
       id: dot.id,
       createdAt: dot.createdAt,
       updatedAt: DateTime.now().millisecondsSinceEpoch,
-      payload_v3: payload,
+      payloadV3: payload,
       title: title ?? dot.title,
       gen: dot.gen,
       originalId: dot.originalId,
@@ -95,7 +95,7 @@ class DotStorage {
   // Helper
   DotModel _toModel(DotEntity entity) {
     try {
-      final result = DotCodec.decode(entity.payload_v3);
+      final result = DotCodec.decode(entity.payloadV3);
 
       return DotModel(
         id: entity.id,
