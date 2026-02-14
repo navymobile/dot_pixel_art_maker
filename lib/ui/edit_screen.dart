@@ -83,7 +83,7 @@ class _EditScreenState extends State<EditScreen> {
               icon: const Icon(Symbols.open_in_full),
               tooltip: 'Resize Canvas',
               onPressed: () {
-                _showScalingSheet(context);
+                _showDotMultiplierSheet(context);
               },
             ),
             const SizedBox(width: 4),
@@ -107,20 +107,20 @@ class _EditScreenState extends State<EditScreen> {
     );
   }
 
-  void _showScalingSheet(BuildContext context) {
+  void _showDotMultiplierSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
       builder: (context) {
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: AppConfig.availableScales.map((scale) {
-              final newSize = AppConfig.dots * scale;
+            children: AppConfig.dotMultipliers.map((multiplier) {
+              final newDots = AppConfig.dots * multiplier;
               return ListTile(
-                title: Text('x$scale (${newSize}x$newSize)'),
+                title: Text('x$multiplier (${newDots}x$newDots)'),
                 onTap: () {
                   Navigator.pop(context);
-                  _scaleDot(scale);
+                  _multiplyDots(multiplier);
                 },
               );
             }).toList(),
@@ -130,26 +130,25 @@ class _EditScreenState extends State<EditScreen> {
     );
   }
 
-  void _scaleDot(int scale) {
-    // 1. Calculate new size
-    final int currentSize = AppConfig.dots;
-    final int newSize = currentSize * scale;
-    final int newCount = newSize * newSize;
+  void _multiplyDots(int multiplier) {
+    // 1. Calculate new dot count
+    final int currentDots = AppConfig.dots;
+    final int newDots = currentDots * multiplier;
+    final int newCount = newDots * newDots;
 
-    // 2. Create new pixels array with scaled content
+    // 2. Create new pixels array with multiplied dots (Nearest Neighbor)
     final List<int> newPixels = List<int>.filled(newCount, 0);
     final List<int> originalPixels = _dot.pixels;
 
-    for (int y = 0; y < newSize; y++) {
-      for (int x = 0; x < newSize; x++) {
-        // Map new coordinate back to original coordinate (Nearest Neighbor)
-        int origX = x ~/ scale;
-        int origY = y ~/ scale;
-        int origIndex = origY * currentSize + origX;
+    for (int y = 0; y < newDots; y++) {
+      for (int x = 0; x < newDots; x++) {
+        int origX = x ~/ multiplier;
+        int origY = y ~/ multiplier;
+        int origIndex = origY * currentDots + origX;
 
         if (origIndex < originalPixels.length) {
           int color = originalPixels[origIndex];
-          int newIndex = y * newSize + x;
+          int newIndex = y * newDots + x;
           newPixels[newIndex] = color;
         }
       }
@@ -158,7 +157,7 @@ class _EditScreenState extends State<EditScreen> {
     // 3. Create new DotModel
     final newDot = DotModel(
       id: DateTime.now().millisecondsSinceEpoch.toString(), // New ID
-      title: '${_dot.title} (x$scale)',
+      title: '${_dot.title} (x$multiplier)',
       pixels: newPixels,
     );
 
